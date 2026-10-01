@@ -1,0 +1,260 @@
+from __future__ import annotations
+
+from typing import Any, Callable
+
+
+MoneyFormatter = Callable[[float | None], str]
+
+
+def interpret_cash_position(
+    assessment: dict[str, Any],
+    *,
+    format_money: MoneyFormatter,
+) -> str | None:
+    cash = assessment.get("cash")
+    classification = assessment.get(
+        "classification",
+        "unknown",
+    )
+
+    if cash is None:
+        return None
+
+    cash_text = format_money(cash)
+
+    if classification == "very_strong":
+        return (
+            f"A substantial cash position of {cash_text} provides "
+            "meaningful financial flexibility, supporting continued "
+            "investment while limiting near-term financing pressure."
+        )
+
+    if classification == "strong":
+        return (
+            f"Cash and equivalents of {cash_text} provide a solid "
+            "liquidity foundation for ongoing operations and "
+            "development activity, although execution discipline "
+            "remains important."
+        )
+
+    if classification == "adequate":
+        return (
+            f"Cash and equivalents of {cash_text} provide operating "
+            "capacity, but the pace of investment and cash consumption "
+            "will remain central to the financing outlook."
+        )
+
+    return (
+        f"Cash and equivalents of {cash_text} support current "
+        "operations, while future flexibility will depend on cash "
+        "consumption and access to additional capital."
+    )
+
+
+def interpret_net_cash(
+    assessment: dict[str, Any],
+    *,
+    format_money: MoneyFormatter,
+) -> str | None:
+    net_cash = assessment.get("net_cash")
+
+    if net_cash is None or net_cash <= 0:
+        return None
+
+    return (
+        f"A net-cash position of approximately "
+        f"{format_money(net_cash)} strengthens the balance sheet and "
+        "provides management with additional strategic flexibility."
+    )
+
+
+def interpret_revenue_growth(
+    assessment: dict[str, Any],
+) -> str | None:
+    growth = assessment.get("growth_pct")
+    classification = assessment.get(
+        "classification",
+        "unknown",
+    )
+
+    if growth is None:
+        return None
+
+    absolute_growth = abs(growth)
+
+    if classification == "strong":
+        return (
+            f"Revenue expanded approximately {absolute_growth:.0f}% "
+            "across the available annual periods, indicating meaningful "
+            "top-line momentum; durability will depend on revenue "
+            "quality and sustained commercial or partnership execution."
+        )
+
+    if classification == "moderate":
+        return (
+            f"Revenue increased approximately {absolute_growth:.0f}% "
+            "across the available annual periods, supporting a positive "
+            "operating trend while leaving room for further evidence of "
+            "durable scale."
+        )
+
+    if classification == "modest":
+        return (
+            f"Revenue increased approximately {absolute_growth:.0f}% "
+            "across the available annual periods, representing measured "
+            "progress rather than a decisive change in the earnings "
+            "profile."
+        )
+
+    if classification == "flat":
+        return (
+            "Revenue remained broadly stable across the available "
+            "annual periods, placing greater emphasis on revenue "
+            "quality, pipeline execution, and future growth catalysts."
+        )
+
+    return (
+        f"Revenue declined approximately {absolute_growth:.0f}% across "
+        "the available annual periods, increasing the importance of "
+        "commercial execution and improved revenue visibility."
+    )
+
+
+def interpret_research_investment(
+    assessment: dict[str, Any],
+    *,
+    format_money: MoneyFormatter,
+) -> str | None:
+    rd_expense = assessment.get("latest_value")
+    classification = assessment.get(
+        "classification",
+        "unknown",
+    )
+
+    if rd_expense is None:
+        return None
+
+    rd_text = format_money(rd_expense)
+
+    if classification in {"very_high", "high"}:
+        return (
+            f"R&D investment of approximately {rd_text} reflects an "
+            "aggressive commitment to platform and pipeline development, "
+            "although clinical and commercial execution must ultimately "
+            "justify the current spending profile."
+        )
+
+    if classification == "moderate":
+        return (
+            f"R&D investment of approximately {rd_text} supports "
+            "continued product and platform development while preserving "
+            "a more balanced operating-cost profile."
+        )
+
+    return (
+        f"R&D investment of approximately {rd_text} supports ongoing "
+        "development activity and future product differentiation."
+    )
+
+
+def interpret_cash_burn_risk(
+    assessment: dict[str, Any],
+    *,
+    format_money: MoneyFormatter,
+) -> str | None:
+    free_cash_flow = assessment.get(
+        "free_cash_flow"
+    )
+
+    if free_cash_flow is None or free_cash_flow >= 0:
+        return None
+
+    return (
+        f"Negative free cash flow of approximately "
+        f"{format_money(abs(free_cash_flow))} increases dependence on "
+        "existing liquidity, partnership funding, or future capital "
+        "raises until operating cash generation improves."
+    )
+
+
+def interpret_profitability_risk(
+    assessment: dict[str, Any],
+) -> str | None:
+    classification = assessment.get(
+        "classification",
+        "unknown",
+    )
+
+    if classification == "loss_making_cash_burning":
+        return (
+            "Sustained operating losses and negative cash generation "
+            "underscore the absence of financial self-sufficiency and "
+            "heighten the importance of disciplined capital allocation."
+        )
+
+    if classification == "loss_making":
+        return (
+            "Continued net losses indicate that the company has not yet "
+            "reached financial self-sufficiency, making execution and "
+            "cost discipline important to the long-term outlook."
+        )
+
+    return None
+
+
+def interpret_balance_sheet_risk(
+    assessment: dict[str, Any],
+) -> str | None:
+    cash = assessment.get("cash")
+    debt = assessment.get("debt")
+
+    if (
+        cash is None
+        or debt is None
+        or debt <= cash
+    ):
+        return None
+
+    return (
+        "Debt exceeds reported cash, reducing balance-sheet flexibility "
+        "and increasing sensitivity to operating performance and "
+        "refinancing conditions."
+    )
+
+
+def development_risks(
+    industry: str,
+) -> list[str]:
+    industry_lower = industry.lower()
+
+    is_life_sciences = any(
+        term in industry_lower
+        for term in [
+            "biotech",
+            "biotechnology",
+            "pharmaceutical",
+            "drug",
+            "therapeutic",
+        ]
+    )
+
+    if is_life_sciences:
+        return [
+            (
+                "Clinical trial failures, development delays, or "
+                "regulatory setbacks could materially impair pipeline "
+                "value and investor confidence."
+            ),
+            (
+                "Lengthy development and commercialization timelines "
+                "delay realization of the platform's economic potential "
+                "and increase execution uncertainty."
+            ),
+        ]
+
+    return [
+        (
+            "Execution delays could weaken operating performance, "
+            "competitive positioning, and the timing of value creation."
+        )
+    ]

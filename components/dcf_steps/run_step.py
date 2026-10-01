@@ -1,0 +1,258 @@
+import pandas as pd
+
+from services.validation import validate_standard_dcf_inputs
+from services.standard_dcf import (
+    run_dcf_case,
+    sensitivity_matrix,
+    reverse_dcf_growth,
+)
+
+from services.comparable_companies import (
+    build_comparable_set,
+    build_comparable_valuation,
+)
+
+
+
+def build_dcf_outputs(company_inputs, scenarios):
+    validated = validate_standard_dcf_inputs(
+        company_name=company_inputs["company_name"],
+        current_market_cap=company_inputs["current_market_cap"],
+        cash=company_inputs["cash"],
+        debt=company_inputs["debt"],
+        shares=company_inputs["shares"],
+        starting_revenue=company_inputs["starting_revenue"],
+        forecast_years=company_inputs["forecast_years"],
+    )
+
+    company_name = validated["company_name"]
+    current_market_cap = validated["current_market_cap"]
+    cash = validated["cash"]
+    debt = validated["debt"]
+    shares = validated["shares"]
+    starting_revenue = validated["starting_revenue"]
+    forecast_years = validated["forecast_years"]
+
+    summary_rows = []
+    forecasts = {}
+
+    for scenario_name, assumptions in scenarios.items():
+        forecast_df, valuation = run_dcf_case(
+            revenue=starting_revenue,
+            years=forecast_years,
+            growth=assumptions["growth"],
+            ebit_margin=assumptions["ebit_margin"],
+            tax_rate=assumptions["tax_rate"],
+            da_pct=assumptions["da_pct"],
+            capex_pct=assumptions["capex_pct"],
+            nwc_pct=assumptions["nwc_pct"],
+            discount_rate=assumptions["discount_rate"],
+            terminal_growth=assumptions["terminal_growth"],
+            cash=cash,
+            debt=debt,
+            shares=shares,
+            margin_of_safety=assumptions["margin_of_safety"],
+        )
+
+        forecasts[scenario_name] = forecast_df
+
+        summary_rows.append({
+            "Scenario": scenario_name,
+            "Enterprise Value ($M)": valuation["Enterprise Value ($M)"],
+            "Equity Value ($M)": valuation["Equity Value ($M)"],
+            "Implied Share Price ($)": valuation["Implied Share Price ($)"],
+            "MoS Price ($)": valuation["Margin of Safety Price ($)"],
+            "Terminal Value %": valuation["Terminal Value %"],
+        })
+
+    summary_df = pd.DataFrame(summary_rows)
+    base_forecast = forecasts["Base Case"]
+
+    sens_df = sensitivity_matrix(
+        revenue=starting_revenue,
+        years=forecast_years,
+        growth=scenarios["Base Case"]["growth"],
+        ebit_margin=scenarios["Base Case"]["ebit_margin"],
+        tax_rate=scenarios["Base Case"]["tax_rate"],
+        da_pct=scenarios["Base Case"]["da_pct"],
+        capex_pct=scenarios["Base Case"]["capex_pct"],
+        nwc_pct=scenarios["Base Case"]["nwc_pct"],
+        cash=cash,
+        debt=debt,
+        shares=shares,
+        margin_of_safety=scenarios["Base Case"]["margin_of_safety"],
+        base_discount_rate=scenarios["Base Case"]["discount_rate"],
+        base_terminal_growth=scenarios["Base Case"]["terminal_growth"],
+    )
+
+    implied_growth = reverse_dcf_growth(
+        target_equity_value=current_market_cap,
+        revenue=starting_revenue,
+        years=forecast_years,
+        ebit_margin=scenarios["Base Case"]["ebit_margin"],
+        tax_rate=scenarios["Base Case"]["tax_rate"],
+        da_pct=scenarios["Base Case"]["da_pct"],
+        capex_pct=scenarios["Base Case"]["capex_pct"],
+        nwc_pct=scenarios["Base Case"]["nwc_pct"],
+        discount_rate=scenarios["Base Case"]["discount_rate"],
+        terminal_growth=scenarios["Base Case"]["terminal_growth"],
+        cash=cash,
+        debt=debt,
+        shares=shares,
+        margin_of_safety=scenarios["Base Case"]["margin_of_safety"],
+    )
+
+    # --------------------------------------------------------------
+    # LIVE TRADING COMPARABLES
+    #
+    # Peer multiples are current/LTM, so the target financial metrics
+    # must also be current/LTM rather than Year-5 DCF forecasts.
+    # --------------------------------------------------------------
+    ticker = company_inputs.get("ticker")
+    industry = company_inputs.get("industry")
+
+    target_revenue = company_inputs.get("ltm_revenue") or starting_revenue
+    target_ebitda = company_inputs.get("ltm_ebitda")
+    target_net_income = company_inputs.get("ltm_net_income")
+
+    if ticker:
+        comps_df = build_comparable_set(
+            ticker=ticker,
+            industry=industry,
+        )
+
+        comps_summary, comps_summary_df = build_comparable_valuation(
+            comps_df=comps_df,
+            target_revenue=target_revenue,
+            target_ebitda=target_ebitda,
+            target_net_income=target_net_income,
+            target_cash=cash,
+            target_debt=debt,
+            target_shares=shares,
+        )
+    else:
+        comps_df = pd.DataFrame()
+        comps_summary = {}
+        comps_summary_df = pd.DataFrame(
+            columns=["Metric", "Value"]
+        )
+
+    # --------------------------------------------------------------
+    # TARGET COMPANY ROW
+    #
+    # Added only AFTER peer medians have been calculated. This keeps
+    # the target company out of its own comparable-company median.
+    # --------------------------------------------------------------
+    if ticker:
+        target_ev = company_inputs.get("enterprise_value")
+
+        if target_ev is None:
+            target_ev = current_market_cap + debt - cash
+
+        target_revenue_growth = company_inputs.get("revenue_growth")
+        target_ebitda_margin = company_inputs.get("ebitda_margin")
+
+        target_ev_revenue = (
+            float(target_ev) / float(target_revenue)
+            if target_ev is not None
+            and target_revenue is not None
+            and float(target_revenue) > 0
+            else None
+        )
+
+        target_ev_ebitda = (
+            float(target_ev) / float(target_ebitda)
+            if target_ev is not None
+            and target_ebitda is not None
+            and float(target_ebitda) > 0
+            else None
+        )
+
+        target_pe = (
+            float(current_market_cap) / float(target_net_income)
+            if current_market_cap is not None
+            and target_net_income is not None
+            and float(target_net_income) > 0
+            else None
+        )
+
+        target_row = pd.DataFrame([{
+            "Company": company_name,
+            "Ticker": ticker,
+            "Peer Type": "Target Company",
+            "Rationale": "Target company — excluded from peer median calculations.",
+            "Market Cap ($M)": current_market_cap,
+            "Enterprise Value ($M)": target_ev,
+            "Revenue ($M)": target_revenue,
+            "EBITDA ($M)": target_ebitda,
+            "Revenue Growth": target_revenue_growth,
+            "EBITDA Margin": target_ebitda_margin,
+            "EV/Revenue": target_ev_revenue,
+            "EV/EBITDA": target_ev_ebitda,
+            "P/E": target_pe,
+        }])
+
+        comps_df = pd.concat(
+            [target_row, comps_df],
+            ignore_index=True,
+        )
+
+    # --------------------------------------------------------------
+    # VALUATION CROSS-CHECK
+    # --------------------------------------------------------------
+    base_price = None
+    base_rows = summary_df.loc[
+        summary_df["Scenario"] == "Base Case",
+        "Implied Share Price ($)",
+    ]
+
+    if not base_rows.empty:
+        base_price = float(base_rows.iloc[0])
+
+    valuation_crosscheck_df = pd.DataFrame([
+        {
+            "Methodology": "DCF — Base Case",
+            "Implied Share Price ($)": base_price,
+        },
+        {
+            "Methodology": "Trading Comps — EV / Revenue",
+            "Implied Share Price ($)": comps_summary.get(
+                "Implied Share Price from Revenue ($)"
+            ),
+        },
+        {
+            "Methodology": "Trading Comps — EV / EBITDA",
+            "Implied Share Price ($)": comps_summary.get(
+                "Implied Share Price from EBITDA ($)"
+            ),
+        },
+        {
+            "Methodology": "Trading Comps — P / E",
+            "Implied Share Price ($)": comps_summary.get(
+                "Implied Share Price from P/E ($)"
+            ),
+        },
+    ])
+
+    return {
+        "ticker": company_inputs.get("ticker"),
+        "sector": company_inputs.get("sector"),
+        "industry": company_inputs.get("industry"),
+        "company_name": company_name,
+        "current_market_cap": current_market_cap,
+        "cash": cash,
+        "debt": debt,
+        "shares": shares,
+        "starting_revenue": starting_revenue,
+        "forecast_years": forecast_years,
+        "summary_df": summary_df,
+        "forecasts": forecasts,
+        "base_forecast": base_forecast,
+        "sens_df": sens_df,
+        "implied_growth": implied_growth,
+        "comps_df": comps_df,
+        "comps_summary": comps_summary,
+        "comps_summary_df": comps_summary_df,
+        "valuation_crosscheck_df": valuation_crosscheck_df,
+        "scenarios": scenarios,
+    }

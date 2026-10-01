@@ -1,0 +1,944 @@
+{
+  "schema_version": "1.1",
+  "valuation_engine": "Veles DCF Engine v1",
+  "ticker": "RXRX",
+  "name": "RXRX Integration Test DCF",
+  "saved_at": "2026-07-12T02:01:31.927350+00:00",
+  "payload": {
+    "snapshot": {
+      "ticker": "RXRX",
+      "base_year": 2025,
+      "base_revenue": {
+        "name": "Base Revenue",
+        "value": 74260000.0,
+        "unit": "USD",
+        "source": "Normalized income statement",
+        "source_key": "Revenue",
+        "status": "observed",
+        "note": ""
+      },
+      "cash": {
+        "name": "Cash and Equivalents",
+        "value": 743290000.0,
+        "unit": "USD",
+        "source": "Normalized balance sheet",
+        "source_key": "Cash & Equivalents",
+        "status": "observed",
+        "note": ""
+      },
+      "debt": {
+        "name": "Total Debt",
+        "value": 77970000.0,
+        "unit": "USD",
+        "source": "Normalized balance sheet",
+        "source_key": "Total Debt",
+        "status": "observed",
+        "note": ""
+      },
+      "beta": {
+        "name": "Beta",
+        "value": 0.99,
+        "unit": "multiple",
+        "source": "Normalized market data",
+        "source_key": "Beta",
+        "status": "observed",
+        "note": ""
+      },
+      "market_cap": {
+        "name": "Market Capitalization",
+        "value": 1890000000.0,
+        "unit": "USD",
+        "source": "Normalized market data",
+        "source_key": "Market Cap",
+        "status": "observed",
+        "note": ""
+      },
+      "enterprise_value": {
+        "name": "Enterprise Value",
+        "value": 1300000000.0,
+        "unit": "USD",
+        "source": "Normalized market data",
+        "source_key": "Enterprise Value",
+        "status": "observed",
+        "note": ""
+      },
+      "diluted_shares_outstanding": {
+        "name": "Diluted Shares Outstanding",
+        "value": 530898876.40449435,
+        "unit": "shares",
+        "source": "Derived from normalized market data",
+        "source_key": "Market Cap / Share Price",
+        "status": "derived",
+        "note": "Derived as market capitalization divided by share price"
+      },
+      "share_price": {
+        "name": "Share Price",
+        "value": 3.56,
+        "unit": "USD/share",
+        "source": "Normalized market data",
+        "source_key": "Share Price",
+        "status": "observed",
+        "note": ""
+      },
+      "metadata": {
+        "research_generated_at": "2026-07-11T20:42:33",
+        "adapter": "Veles Valuation Data Adapter v1"
+      },
+      "warnings": []
+    },
+    "assumption_build": {
+      "assumptions": {
+        "ticker": "RXRX",
+        "base_year": 2025,
+        "base_revenue": 74260000.0,
+        "revenue_growth_rates": [
+          0.2,
+          0.25,
+          0.3,
+          0.28,
+          0.22
+        ],
+        "ebit_margins": [
+          -5.5,
+          -3.5,
+          -2.0,
+          -0.75,
+          0.05
+        ],
+        "tax_rate": 0.21,
+        "depreciation_amortization_pct_revenue": 0.06,
+        "capex_pct_revenue": 0.08,
+        "nwc_pct_revenue_change": 0.05,
+        "risk_free_rate": 0.04,
+        "equity_risk_premium": 0.055,
+        "beta": 0.99,
+        "cost_of_debt": 0.07,
+        "debt_weight": 0.05,
+        "equity_weight": 0.95,
+        "terminal_growth_rate": 0.025,
+        "cash": 743290000.0,
+        "debt": 77970000.0,
+        "diluted_shares_outstanding": 530898876.40449435,
+        "valuation_date": "2026-07-11",
+        "scenario_name": "Base"
+      },
+      "observed_inputs": {
+        "base_revenue": {
+          "value": 74260000.0,
+          "unit": "USD",
+          "source": "Normalized income statement",
+          "source_key": "Revenue",
+          "status": "observed",
+          "note": ""
+        },
+        "cash": {
+          "value": 743290000.0,
+          "unit": "USD",
+          "source": "Normalized balance sheet",
+          "source_key": "Cash & Equivalents",
+          "status": "observed",
+          "note": ""
+        },
+        "debt": {
+          "value": 77970000.0,
+          "unit": "USD",
+          "source": "Normalized balance sheet",
+          "source_key": "Total Debt",
+          "status": "observed",
+          "note": ""
+        },
+        "beta": {
+          "value": 0.99,
+          "unit": "multiple",
+          "source": "Normalized market data",
+          "source_key": "Beta",
+          "status": "observed",
+          "note": ""
+        },
+        "market_cap": {
+          "value": 1890000000.0,
+          "unit": "USD",
+          "source": "Normalized market data",
+          "source_key": "Market Cap",
+          "status": "observed",
+          "note": ""
+        },
+        "enterprise_value": {
+          "value": 1300000000.0,
+          "unit": "USD",
+          "source": "Normalized market data",
+          "source_key": "Enterprise Value",
+          "status": "observed",
+          "note": ""
+        },
+        "diluted_shares_outstanding": {
+          "value": 530898876.40449435,
+          "unit": "shares",
+          "source": "Derived from normalized market data",
+          "source_key": "Market Cap / Share Price",
+          "status": "derived",
+          "note": "Derived as market capitalization divided by share price"
+        },
+        "share_price": {
+          "value": 3.56,
+          "unit": "USD/share",
+          "source": "Normalized market data",
+          "source_key": "Share Price",
+          "status": "observed",
+          "note": ""
+        }
+      },
+      "analyst_inputs": {
+        "forecast_profile": {
+          "revenue_growth_rates": [
+            0.2,
+            0.25,
+            0.3,
+            0.28,
+            0.22
+          ],
+          "ebit_margins": [
+            -5.5,
+            -3.5,
+            -2.0,
+            -0.75,
+            0.05
+          ],
+          "tax_rate": 0.21,
+          "depreciation_amortization_pct_revenue": 0.06,
+          "capex_pct_revenue": 0.08,
+          "nwc_pct_revenue_change": 0.05,
+          "terminal_growth_rate": 0.025,
+          "source": "Illustrative Veles platform-biotech profile",
+          "note": "Requires analyst review. Early-stage biotechnology forecasts are highly sensitive to partnerships, milestones, clinical progress, and financing."
+        },
+        "capital_market_assumptions": {
+          "risk_free_rate": 0.04,
+          "equity_risk_premium": 0.055,
+          "cost_of_debt": 0.07,
+          "debt_weight": 0.05,
+          "equity_weight": 0.95,
+          "beta_override": null,
+          "source": "Illustrative analyst assumptions",
+          "note": "Integration test only. Not investment advice."
+        }
+      },
+      "warnings": [
+        "At least one EBIT margin assumption is outside -200% to 100%.",
+        "Diluted shares outstanding were inferred from market capitalization divided by share price."
+      ]
+    },
+    "base_result": {
+      "ticker": "RXRX",
+      "scenario_name": "Base",
+      "forecast": [
+        {
+          "year": 2026,
+          "revenue": 89112000.0,
+          "revenue_growth": 0.2,
+          "ebit_margin": -5.5,
+          "ebit": -490116000.0,
+          "tax_rate": 0.0,
+          "nopat": -490116000.0,
+          "depreciation_amortization": 5346720.0,
+          "capital_expenditures": 7128960.0,
+          "change_in_nwc": 742600.0,
+          "unlevered_fcf": -492640840.0,
+          "discount_factor": 0.9153380915658459,
+          "present_value_fcf": -450932926.31299525
+        },
+        {
+          "year": 2027,
+          "revenue": 111390000.0,
+          "revenue_growth": 0.25,
+          "ebit_margin": -3.5,
+          "ebit": -389865000.0,
+          "tax_rate": 0.0,
+          "nopat": -389865000.0,
+          "depreciation_amortization": 6683400.0,
+          "capital_expenditures": 8911200.0,
+          "change_in_nwc": 1113900.0,
+          "unlevered_fcf": -393206700.0,
+          "discount_factor": 0.8378438218714049,
+          "present_value_fcf": -329445804.31344295
+        },
+        {
+          "year": 2028,
+          "revenue": 144807000.0,
+          "revenue_growth": 0.3,
+          "ebit_margin": -2.0,
+          "ebit": -289614000.0,
+          "tax_rate": 0.0,
+          "nopat": -289614000.0,
+          "depreciation_amortization": 8688420.0,
+          "capital_expenditures": 11584560.0,
+          "change_in_nwc": 1670850.0,
+          "unlevered_fcf": -294180990.0,
+          "discount_factor": 0.7669103649420063,
+          "present_value_fcf": -225610450.3999007
+        },
+        {
+          "year": 2029,
+          "revenue": 185352960.0,
+          "revenue_growth": 0.28,
+          "ebit_margin": -0.75,
+          "ebit": -139014720.0,
+          "tax_rate": 0.0,
+          "nopat": -139014720.0,
+          "depreciation_amortization": 11121177.6,
+          "capital_expenditures": 14828236.8,
+          "change_in_nwc": 2027298.0,
+          "unlevered_fcf": -144749077.20000002,
+          "discount_factor": 0.7019822698480825,
+          "present_value_fcf": -101611285.77127135
+        },
+        {
+          "year": 2030,
+          "revenue": 226130611.2,
+          "revenue_growth": 0.22,
+          "ebit_margin": 0.05,
+          "ebit": 11306530.56,
+          "tax_rate": 0.21,
+          "nopat": 8932159.1424,
+          "depreciation_amortization": 13567836.671999998,
+          "capital_expenditures": 18090448.895999998,
+          "change_in_nwc": 2038882.5599999996,
+          "unlevered_fcf": 2370664.358400001,
+          "discount_factor": 0.6425511111958044,
+          "present_value_fcf": 1523273.0177622095
+        }
+      ],
+      "cost_of_equity": 0.09445,
+      "after_tax_cost_of_debt": 0.05530000000000001,
+      "wacc": 0.0924925,
+      "terminal_value": 36002977.62506946,
+      "present_value_terminal_value": 23133753.279346067,
+      "present_value_forecast_fcf": -1106077193.779848,
+      "enterprise_value": -1082943440.500502,
+      "net_debt": -665320000.0,
+      "equity_value": -417623440.5005021,
+      "implied_value_per_share": -0.7866346286676125,
+      "assumptions": {
+        "ticker": "RXRX",
+        "base_year": 2025,
+        "base_revenue": 74260000.0,
+        "revenue_growth_rates": [
+          0.2,
+          0.25,
+          0.3,
+          0.28,
+          0.22
+        ],
+        "ebit_margins": [
+          -5.5,
+          -3.5,
+          -2.0,
+          -0.75,
+          0.05
+        ],
+        "tax_rate": 0.21,
+        "depreciation_amortization_pct_revenue": 0.06,
+        "capex_pct_revenue": 0.08,
+        "nwc_pct_revenue_change": 0.05,
+        "risk_free_rate": 0.04,
+        "equity_risk_premium": 0.055,
+        "beta": 0.99,
+        "cost_of_debt": 0.07,
+        "debt_weight": 0.05,
+        "equity_weight": 0.95,
+        "terminal_growth_rate": 0.025,
+        "cash": 743290000.0,
+        "debt": 77970000.0,
+        "diluted_shares_outstanding": 530898876.40449435,
+        "valuation_date": "2026-07-11",
+        "scenario_name": "Base"
+      },
+      "warnings": [
+        "At least one EBIT margin assumption is outside -200% to 100%."
+      ]
+    },
+    "scenarios": {
+      "bull": {
+        "ticker": "RXRX",
+        "scenario_name": "Bull",
+        "forecast": [
+          {
+            "year": 2026,
+            "revenue": 92825000.0,
+            "revenue_growth": 0.25,
+            "ebit_margin": -5.45,
+            "ebit": -505896250.0,
+            "tax_rate": 0.0,
+            "nopat": -505896250.0,
+            "depreciation_amortization": 5569500.0,
+            "capital_expenditures": 7426000.0,
+            "change_in_nwc": 928250.0,
+            "unlevered_fcf": -508681000.0,
+            "discount_factor": 0.919295084529183,
+            "present_value_fcf": -467627942.89338934
+          },
+          {
+            "year": 2027,
+            "revenue": 120672500.0,
+            "revenue_growth": 0.3,
+            "ebit_margin": -3.45,
+            "ebit": -416320125.0,
+            "tax_rate": 0.0,
+            "nopat": -416320125.0,
+            "depreciation_amortization": 7240350.0,
+            "capital_expenditures": 9653800.0,
+            "change_in_nwc": 1392375.0,
+            "unlevered_fcf": -420125950.0,
+            "discount_factor": 0.8451034524395177,
+            "present_value_fcf": -355049890.80443215
+          },
+          {
+            "year": 2028,
+            "revenue": 162907875.0,
+            "revenue_growth": 0.35,
+            "ebit_margin": -1.95,
+            "ebit": -317670356.25,
+            "tax_rate": 0.0,
+            "nopat": -317670356.25,
+            "depreciation_amortization": 9774472.5,
+            "capital_expenditures": 13032630.0,
+            "change_in_nwc": 2111768.75,
+            "unlevered_fcf": -323040282.5,
+            "discount_factor": 0.7768994497462909,
+            "present_value_fcf": -250969817.72013637
+          },
+          {
+            "year": 2029,
+            "revenue": 216667473.75,
+            "revenue_growth": 0.33,
+            "ebit_margin": -0.7,
+            "ebit": -151667231.625,
+            "tax_rate": 0.0,
+            "nopat": -151667231.625,
+            "depreciation_amortization": 13000048.424999999,
+            "capital_expenditures": 17333397.9,
+            "change_in_nwc": 2687979.9375,
+            "unlevered_fcf": -158688561.0375,
+            "discount_factor": 0.7141998453251922,
+            "present_value_fcf": -113335345.74785982
+          },
+          {
+            "year": 2030,
+            "revenue": 275167691.6625,
+            "revenue_growth": 0.27,
+            "ebit_margin": 0.1,
+            "ebit": 27516769.166250005,
+            "tax_rate": 0.21,
+            "nopat": 21738247.641337506,
+            "depreciation_amortization": 16510061.499750001,
+            "capital_expenditures": 22013415.333,
+            "change_in_nwc": 2925010.8956250013,
+            "unlevered_fcf": 13309882.912462508,
+            "discount_factor": 0.6565604071789519,
+            "present_value_fcf": 8738742.14451056
+          }
+        ],
+        "cost_of_equity": 0.0895,
+        "after_tax_cost_of_debt": 0.05530000000000001,
+        "wacc": 0.08778999999999999,
+        "terminal_value": 237224076.82707018,
+        "present_value_terminal_value": 155751936.47423217,
+        "present_value_forecast_fcf": -1178244255.0213072,
+        "enterprise_value": -1022492318.547075,
+        "net_debt": -665320000.0,
+        "equity_value": -357172318.54707503,
+        "implied_value_per_share": -0.6727690232950196,
+        "assumptions": {
+          "ticker": "RXRX",
+          "base_year": 2025,
+          "base_revenue": 74260000.0,
+          "revenue_growth_rates": [
+            0.25,
+            0.3,
+            0.35,
+            0.33,
+            0.27
+          ],
+          "ebit_margins": [
+            -5.45,
+            -3.45,
+            -1.95,
+            -0.7,
+            0.1
+          ],
+          "tax_rate": 0.21,
+          "depreciation_amortization_pct_revenue": 0.06,
+          "capex_pct_revenue": 0.08,
+          "nwc_pct_revenue_change": 0.05,
+          "risk_free_rate": 0.04,
+          "equity_risk_premium": 0.05,
+          "beta": 0.99,
+          "cost_of_debt": 0.07,
+          "debt_weight": 0.05,
+          "equity_weight": 0.95,
+          "terminal_growth_rate": 0.030000000000000002,
+          "cash": 743290000.0,
+          "debt": 77970000.0,
+          "diluted_shares_outstanding": 530898876.40449435,
+          "valuation_date": "2026-07-11",
+          "scenario_name": "Bull"
+        },
+        "warnings": [
+          "At least one EBIT margin assumption is outside -200% to 100%."
+        ]
+      },
+      "base": {
+        "ticker": "RXRX",
+        "scenario_name": "Base",
+        "forecast": [
+          {
+            "year": 2026,
+            "revenue": 89112000.0,
+            "revenue_growth": 0.2,
+            "ebit_margin": -5.5,
+            "ebit": -490116000.0,
+            "tax_rate": 0.0,
+            "nopat": -490116000.0,
+            "depreciation_amortization": 5346720.0,
+            "capital_expenditures": 7128960.0,
+            "change_in_nwc": 742600.0,
+            "unlevered_fcf": -492640840.0,
+            "discount_factor": 0.9153380915658459,
+            "present_value_fcf": -450932926.31299525
+          },
+          {
+            "year": 2027,
+            "revenue": 111390000.0,
+            "revenue_growth": 0.25,
+            "ebit_margin": -3.5,
+            "ebit": -389865000.0,
+            "tax_rate": 0.0,
+            "nopat": -389865000.0,
+            "depreciation_amortization": 6683400.0,
+            "capital_expenditures": 8911200.0,
+            "change_in_nwc": 1113900.0,
+            "unlevered_fcf": -393206700.0,
+            "discount_factor": 0.8378438218714049,
+            "present_value_fcf": -329445804.31344295
+          },
+          {
+            "year": 2028,
+            "revenue": 144807000.0,
+            "revenue_growth": 0.3,
+            "ebit_margin": -2.0,
+            "ebit": -289614000.0,
+            "tax_rate": 0.0,
+            "nopat": -289614000.0,
+            "depreciation_amortization": 8688420.0,
+            "capital_expenditures": 11584560.0,
+            "change_in_nwc": 1670850.0,
+            "unlevered_fcf": -294180990.0,
+            "discount_factor": 0.7669103649420063,
+            "present_value_fcf": -225610450.3999007
+          },
+          {
+            "year": 2029,
+            "revenue": 185352960.0,
+            "revenue_growth": 0.28,
+            "ebit_margin": -0.75,
+            "ebit": -139014720.0,
+            "tax_rate": 0.0,
+            "nopat": -139014720.0,
+            "depreciation_amortization": 11121177.6,
+            "capital_expenditures": 14828236.8,
+            "change_in_nwc": 2027298.0,
+            "unlevered_fcf": -144749077.20000002,
+            "discount_factor": 0.7019822698480825,
+            "present_value_fcf": -101611285.77127135
+          },
+          {
+            "year": 2030,
+            "revenue": 226130611.2,
+            "revenue_growth": 0.22,
+            "ebit_margin": 0.05,
+            "ebit": 11306530.56,
+            "tax_rate": 0.21,
+            "nopat": 8932159.1424,
+            "depreciation_amortization": 13567836.671999998,
+            "capital_expenditures": 18090448.895999998,
+            "change_in_nwc": 2038882.5599999996,
+            "unlevered_fcf": 2370664.358400001,
+            "discount_factor": 0.6425511111958044,
+            "present_value_fcf": 1523273.0177622095
+          }
+        ],
+        "cost_of_equity": 0.09445,
+        "after_tax_cost_of_debt": 0.05530000000000001,
+        "wacc": 0.0924925,
+        "terminal_value": 36002977.62506946,
+        "present_value_terminal_value": 23133753.279346067,
+        "present_value_forecast_fcf": -1106077193.779848,
+        "enterprise_value": -1082943440.500502,
+        "net_debt": -665320000.0,
+        "equity_value": -417623440.5005021,
+        "implied_value_per_share": -0.7866346286676125,
+        "assumptions": {
+          "ticker": "RXRX",
+          "base_year": 2025,
+          "base_revenue": 74260000.0,
+          "revenue_growth_rates": [
+            0.2,
+            0.25,
+            0.3,
+            0.28,
+            0.22
+          ],
+          "ebit_margins": [
+            -5.5,
+            -3.5,
+            -2.0,
+            -0.75,
+            0.05
+          ],
+          "tax_rate": 0.21,
+          "depreciation_amortization_pct_revenue": 0.06,
+          "capex_pct_revenue": 0.08,
+          "nwc_pct_revenue_change": 0.05,
+          "risk_free_rate": 0.04,
+          "equity_risk_premium": 0.055,
+          "beta": 0.99,
+          "cost_of_debt": 0.07,
+          "debt_weight": 0.05,
+          "equity_weight": 0.95,
+          "terminal_growth_rate": 0.025,
+          "cash": 743290000.0,
+          "debt": 77970000.0,
+          "diluted_shares_outstanding": 530898876.40449435,
+          "valuation_date": "2026-07-11",
+          "scenario_name": "Base"
+        },
+        "warnings": [
+          "At least one EBIT margin assumption is outside -200% to 100%."
+        ]
+      },
+      "bear": {
+        "ticker": "RXRX",
+        "scenario_name": "Bear",
+        "forecast": [
+          {
+            "year": 2026,
+            "revenue": 85399000.0,
+            "revenue_growth": 0.15000000000000002,
+            "ebit_margin": -5.55,
+            "ebit": -473964450.0,
+            "tax_rate": 0.0,
+            "nopat": -473964450.0,
+            "depreciation_amortization": 5123940.0,
+            "capital_expenditures": 6831920.0,
+            "change_in_nwc": 556950.0,
+            "unlevered_fcf": -476229380.0,
+            "discount_factor": 0.9075254277280782,
+            "present_value_fcf": -432190271.7811775
+          },
+          {
+            "year": 2027,
+            "revenue": 102478800.0,
+            "revenue_growth": 0.2,
+            "ebit_margin": -3.55,
+            "ebit": -363799740.0,
+            "tax_rate": 0.0,
+            "nopat": -363799740.0,
+            "depreciation_amortization": 6148728.0,
+            "capital_expenditures": 8198304.0,
+            "change_in_nwc": 853990.0,
+            "unlevered_fcf": -366703306.0,
+            "discount_factor": 0.8236024019730313,
+            "present_value_fcf": -302017723.63305146
+          },
+          {
+            "year": 2028,
+            "revenue": 128098500.0,
+            "revenue_growth": 0.25,
+            "ebit_margin": -2.05,
+            "ebit": -262601924.99999997,
+            "tax_rate": 0.0,
+            "nopat": -262601924.99999997,
+            "depreciation_amortization": 7685910.0,
+            "capital_expenditures": 10247880.0,
+            "change_in_nwc": 1280985.0,
+            "unlevered_fcf": -266444879.99999997,
+            "discount_factor": 0.7474401221284478,
+            "present_value_fcf": -199151593.6476996
+          },
+          {
+            "year": 2029,
+            "revenue": 157561155.0,
+            "revenue_growth": 0.23000000000000004,
+            "ebit_margin": -0.8,
+            "ebit": -126048924.0,
+            "tax_rate": 0.0,
+            "nopat": -126048924.0,
+            "depreciation_amortization": 9453669.299999999,
+            "capital_expenditures": 12604892.4,
+            "change_in_nwc": 1473132.75,
+            "unlevered_fcf": -130673279.85000001,
+            "discount_factor": 0.6783209165357466,
+            "present_value_fcf": -88638418.9545841
+          },
+          {
+            "year": 2030,
+            "revenue": 184346551.35,
+            "revenue_growth": 0.16999999999999998,
+            "ebit_margin": 0.0,
+            "ebit": 0.0,
+            "tax_rate": 0.0,
+            "nopat": 0.0,
+            "depreciation_amortization": 11060793.080999998,
+            "capital_expenditures": 14747724.108,
+            "change_in_nwc": 1339269.8175,
+            "unlevered_fcf": -5026200.844500001,
+            "discount_factor": 0.6155934799160054,
+            "present_value_fcf": -3094096.4686225206
+          }
+        ],
+        "cost_of_equity": 0.10435,
+        "after_tax_cost_of_debt": 0.05530000000000001,
+        "wacc": 0.1018975,
+        "terminal_value": -62599284.000000015,
+        "present_value_terminal_value": -38535711.07781033,
+        "present_value_forecast_fcf": -1025092104.4851352,
+        "enterprise_value": -1063627815.5629455,
+        "net_debt": -665320000.0,
+        "equity_value": -398307815.5629455,
+        "implied_value_per_share": -0.7502517584148604,
+        "assumptions": {
+          "ticker": "RXRX",
+          "base_year": 2025,
+          "base_revenue": 74260000.0,
+          "revenue_growth_rates": [
+            0.15000000000000002,
+            0.2,
+            0.25,
+            0.23000000000000004,
+            0.16999999999999998
+          ],
+          "ebit_margins": [
+            -5.55,
+            -3.55,
+            -2.05,
+            -0.8,
+            0.0
+          ],
+          "tax_rate": 0.21,
+          "depreciation_amortization_pct_revenue": 0.06,
+          "capex_pct_revenue": 0.08,
+          "nwc_pct_revenue_change": 0.05,
+          "risk_free_rate": 0.04,
+          "equity_risk_premium": 0.065,
+          "beta": 0.99,
+          "cost_of_debt": 0.07,
+          "debt_weight": 0.05,
+          "equity_weight": 0.95,
+          "terminal_growth_rate": 0.02,
+          "cash": 743290000.0,
+          "debt": 77970000.0,
+          "diluted_shares_outstanding": 530898876.40449435,
+          "valuation_date": "2026-07-11",
+          "scenario_name": "Bear"
+        },
+        "warnings": [
+          "At least one EBIT margin assumption is outside -200% to 100%.",
+          "Terminal value is negative because terminal-year FCF is negative."
+        ]
+      }
+    },
+    "sensitivity": {
+      "wacc_values": [
+        0.09,
+        0.1,
+        0.11,
+        0.12,
+        0.13
+      ],
+      "terminal_growth_values": [
+        0.01,
+        0.015,
+        0.02,
+        0.025,
+        0.03
+      ],
+      "cells": [
+        {
+          "wacc": 0.09,
+          "terminal_growth_rate": 0.01,
+          "enterprise_value": -1091630902.2149699,
+          "equity_value": -426310902.2149699,
+          "implied_value_per_share": -0.8029983131668216
+        },
+        {
+          "wacc": 0.09,
+          "terminal_growth_rate": 0.015,
+          "enterprise_value": -1090231370.2162497,
+          "equity_value": -424911370.2162497,
+          "implied_value_per_share": -0.8003621576560048
+        },
+        {
+          "wacc": 0.09,
+          "terminal_growth_rate": 0.02,
+          "enterprise_value": -1088631905.074855,
+          "equity_value": -423311905.0748551,
+          "implied_value_per_share": -0.7973494085007853
+        },
+        {
+          "wacc": 0.09,
+          "terminal_growth_rate": 0.025,
+          "enterprise_value": -1086786368.373246,
+          "equity_value": -421466368.37324595,
+          "implied_value_per_share": -0.7938731594755322
+        },
+        {
+          "wacc": 0.09,
+          "terminal_growth_rate": 0.03,
+          "enterprise_value": -1084633242.2213688,
+          "equity_value": -419313242.2213688,
+          "implied_value_per_share": -0.789817535612737
+        },
+        {
+          "wacc": 0.1,
+          "terminal_growth_rate": 0.01,
+          "enterprise_value": -1074716560.444414,
+          "equity_value": -409396560.4444139,
+          "implied_value_per_share": -0.7711384948053511
+        },
+        {
+          "wacc": 0.1,
+          "terminal_growth_rate": 0.015,
+          "enterprise_value": -1073658262.6307266,
+          "equity_value": -408338262.6307266,
+          "implied_value_per_share": -0.7691450872832734
+        },
+        {
+          "wacc": 0.1,
+          "terminal_growth_rate": 0.02,
+          "enterprise_value": -1072467677.5903282,
+          "equity_value": -407147677.5903282,
+          "implied_value_per_share": -0.7669025038209357
+        },
+        {
+          "wacc": 0.1,
+          "terminal_growth_rate": 0.025,
+          "enterprise_value": -1071118347.877877,
+          "equity_value": -405798347.877877,
+          "implied_value_per_share": -0.7643609092302869
+        },
+        {
+          "wacc": 0.1,
+          "terminal_growth_rate": 0.03,
+          "enterprise_value": -1069576256.7779325,
+          "equity_value": -404256256.7779325,
+          "implied_value_per_share": -0.7614562296981163
+        },
+        {
+          "wacc": 0.11,
+          "terminal_growth_rate": 0.01,
+          "enterprise_value": -1057792959.8377718,
+          "equity_value": -392472959.8377718,
+          "implied_value_per_share": -0.7392612365198241
+        },
+        {
+          "wacc": 0.11,
+          "terminal_growth_rate": 0.015,
+          "enterprise_value": -1056971049.2892562,
+          "equity_value": -391651049.2892562,
+          "implied_value_per_share": -0.7377130875501334
+        },
+        {
+          "wacc": 0.11,
+          "terminal_growth_rate": 0.02,
+          "enterprise_value": -1056057815.346461,
+          "equity_value": -390737815.34646106,
+          "implied_value_per_share": -0.7359929220282547
+        },
+        {
+          "wacc": 0.11,
+          "terminal_growth_rate": 0.025,
+          "enterprise_value": -1055037142.1162783,
+          "equity_value": -389717142.1162783,
+          "implied_value_per_share": -0.7340703840920375
+        },
+        {
+          "wacc": 0.11,
+          "terminal_growth_rate": 0.03,
+          "enterprise_value": -1053888884.7323227,
+          "equity_value": -388568884.7323227,
+          "implied_value_per_share": -0.7319075289137931
+        },
+        {
+          "wacc": 0.12,
+          "terminal_growth_rate": 0.01,
+          "enterprise_value": -1041006375.9064565,
+          "equity_value": -375686375.9064565,
+          "implied_value_per_share": -0.7076420625539603
+        },
+        {
+          "wacc": 0.12,
+          "terminal_growth_rate": 0.015,
+          "enterprise_value": -1040354168.0893166,
+          "equity_value": -375034168.0893166,
+          "implied_value_per_share": -0.7064135652899297
+        },
+        {
+          "wacc": 0.12,
+          "terminal_growth_rate": 0.02,
+          "enterprise_value": -1039636739.4904627,
+          "equity_value": -374316739.49046266,
+          "implied_value_per_share": -0.7050622182994959
+        },
+        {
+          "wacc": 0.12,
+          "terminal_growth_rate": 0.025,
+          "enterprise_value": -1038843792.0917294,
+          "equity_value": -373523792.0917294,
+          "implied_value_per_share": -0.7035686242574375
+        },
+        {
+          "wacc": 0.12,
+          "terminal_growth_rate": 0.03,
+          "enterprise_value": -1037962739.4264703,
+          "equity_value": -372642739.4264703,
+          "implied_value_per_share": -0.7019090753218171
+        },
+        {
+          "wacc": 0.13,
+          "terminal_growth_rate": 0.01,
+          "enterprise_value": -1024446930.4372735,
+          "equity_value": -359126930.4372735,
+          "implied_value_per_share": -0.6764507261146527
+        },
+        {
+          "wacc": 0.13,
+          "terminal_growth_rate": 0.015,
+          "enterprise_value": -1023920128.6807342,
+          "equity_value": -358600128.68073416,
+          "implied_value_per_share": -0.6754584434409596
+        },
+        {
+          "wacc": 0.13,
+          "terminal_growth_rate": 0.02,
+          "enterprise_value": -1023345435.8554184,
+          "equity_value": -358025435.85541844,
+          "implied_value_per_share": -0.674375953251476
+        },
+        {
+          "wacc": 0.13,
+          "terminal_growth_rate": 0.025,
+          "enterprise_value": -1022716010.3800727,
+          "equity_value": -357396010.3800727,
+          "implied_value_per_share": -0.6731903687582322
+        },
+        {
+          "wacc": 0.13,
+          "terminal_growth_rate": 0.03,
+          "enterprise_value": -1022023642.3571923,
+          "equity_value": -356703642.3571923,
+          "implied_value_per_share": -0.6718862258156638
+        }
+      ]
+    }
+  }
+}

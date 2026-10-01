@@ -1,0 +1,16 @@
+.env
+.env.*
+__pycache__/
+*.pyc
+.DS_Store
+saved_valuations/*.json
+project_dump.txt
+logs/
+
+# Local environment and generated output
+.env
+.venv/
+venv/
+data/
+output/
+*.log

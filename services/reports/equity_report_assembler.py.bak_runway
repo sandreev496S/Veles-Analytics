@@ -1,0 +1,662 @@
+from __future__ import annotations
+
+import re
+from datetime import date
+from typing import Any
+
+from services.orchestrator.research_orchestrator import build_research_dataset
+from services.charts.financial_chart_engine import generate_financial_charts
+from services.branding.company_brand_service import get_company_brand
+from services.reports.analyst_summary import build_executive_summary
+from services.ai.analyst_writer import generate_analyst_commentary
+from services.reports.models import MetricCard, ReportDocument, ReportSection
+from services.reports.profiles import (
+    PROFESSIONAL_REPORT_PROFILE,
+    ReportProfile,
+)
+from services.valuation import (
+    adapt_saved_valuation_for_report,
+    load_latest_valuation,
+)
+
+
+HIDDEN_VALUES = {"N/A", "", None, "Unknown", "None"}
+
+
+def _clean_snapshot(snapshot: dict[str, Any]) -> dict[str, Any]:
+    return {
+        key: value
+        for key, value in snapshot.items()
+        if value not in HIDDEN_VALUES
+    }
+
+
+def _table_to_dict(table: list[list[Any]]) -> dict[str, Any]:
+    result: dict[str, Any] = {}
+
+    for row in table[1:]:
+        if len(row) >= 2:
+            result[str(row[0])] = row[1]
+
+    return result
+
+
+def _get_statement_value(
+    table: list[list[Any]],
+    metric_name: str,
+    column_index: int = 1,
+    default: str = "N/A",
+) -> str:
+    for row in table[1:]:
+        if row and str(row[0]).strip() == metric_name:
+            if len(row) > column_index:
+                return str(row[column_index])
+
+    return default
+
+
+def _parse_money(value: Any) -> float | None:
+    if value in HIDDEN_VALUES:
+        return None
+
+    text = str(value).replace("$", "").replace(",", "").strip()
+
+    multiplier = 1.0
+
+    if text.endswith("B"):
+        multiplier = 1_000_000_000
+        text = text[:-1]
+    elif text.endswith("M"):
+        multiplier = 1_000_000
+        text = text[:-1]
+    elif text.endswith("K"):
+        multiplier = 1_000
+        text = text[:-1]
+
+    try:
+        return float(text) * multiplier
+    except ValueError:
+        return None
+
+
+def _format_runway(
+    cash_value: str,
+    annual_cash_burn_value: str,
+) -> str:
+    cash = _parse_money(cash_value)
+    annual_cash_burn = _parse_money(annual_cash_burn_value)
+
+    if not cash or not annual_cash_burn:
+        return "N/A"
+
+    if annual_cash_burn >= 0:
+        return "Not burning cash"
+
+    years = cash / abs(annual_cash_burn)
+
+    if years <= 0:
+        return "N/A"
+
+    return f"{years:.1f} years"
+
+
+def _shorten_business_model(
+    company_name: str,
+    industry: str,
+) -> str:
+    return (
+        f"{company_name} operates through a platform-based {industry.lower()} "
+        "business model. The company combines internal product development with "
+        "strategic partnerships, research collaborations, milestone economics, "
+        "and potential future product commercialization. Long-term value depends "
+        "on converting its technical platform into clinically validated assets "
+        "and durable commercial revenue."
+    )
+
+
+def _latest_filing_summary(recent_filings: list[dict[str, Any]]) -> str:
+    if not recent_filings:
+        return "No recent filing available"
+
+    filing = recent_filings[0]
+    form = filing.get("form", "Unknown form")
+    filing_date = filing.get("filing_date", "Unknown date")
+
+    meanings = {
+        "10-K": "Annual report",
+        "10-Q": "Quarterly report",
+        "8-K": "Material event",
+        "4": "Insider transaction",
+        "144": "Proposed securities sale",
+        "S-1": "Registration statement",
+        "S-3": "Shelf registration",
+    }
+
+    meaning = meanings.get(str(form), "SEC filing")
+    return f"{form} — {meaning} ({filing_date})"
+
+
+def assemble_equity_report(
+    ticker: str,
+    profile: ReportProfile | None = None,
+) -> ReportDocument:
+    profile = profile or PROFESSIONAL_REPORT_PROFILE
+    research = build_research_dataset(
+        ticker,
+        selected_capabilities=[
+            "company",
+            "financials",
+            "market",
+            "filings",
+            "company_facts",
+        ],
+    )
+
+    company = research.get("company", {})
+    financials = research.get("financials", {})
+    market = research.get("market", {})
+    sec = research.get("sec", {})
+
+    today = date.today().strftime("%B %d, %Y")
+
+    company_name = company.get("company_name", ticker.upper())
+    normalized_ticker = company.get("ticker", ticker.upper())
+    industry = company.get("industry", "N/A")
+
+    income_statement = financials.get("income_statement", [])
+    balance_sheet = financials.get("balance_sheet", [])
+    cash_flow = financials.get("cash_flow", [])
+
+    market_snapshot = market.get("tables", {}).get("market_snapshot", [])
+    valuation_multiples = market.get("tables", {}).get(
+        "valuation_multiples",
+        [],
+    )
+
+    market_metrics = _table_to_dict(market_snapshot)
+
+    revenue = _get_statement_value(income_statement, "Revenue")
+    rd_expense = _get_statement_value(income_statement, "R&D Expense")
+    net_income = _get_statement_value(income_statement, "Net Income")
+    cash = _get_statement_value(balance_sheet, "Cash & Equivalents")
+    debt = _get_statement_value(balance_sheet, "Total Debt")
+    free_cash_flow = _get_statement_value(cash_flow, "Free Cash Flow")
+
+    estimated_runway = _format_runway(cash, free_cash_flow)
+
+    sec_filings = sec.get("filings", {})
+    recent_filings = sec_filings.get("recent", [])
+
+    latest_filing = _latest_filing_summary(recent_filings)
+
+    brand = get_company_brand(
+        ticker=normalized_ticker,
+        website=str(company.get("website", "")),
+    )
+
+    executive_summary = build_executive_summary(
+        company_name=company_name,
+        ticker=normalized_ticker,
+        exchange=str(
+            company.get(
+                "exchange",
+                "N/A",
+            )
+        ),
+        industry=industry,
+        company_description=str(
+            company.get(
+                "description",
+                "",
+            )
+        ),
+        income_statement=income_statement,
+        balance_sheet=balance_sheet,
+        cash_flow=cash_flow,
+        estimated_runway=estimated_runway,
+        latest_filing=latest_filing,
+    )
+
+    try:
+        analyst_commentary_model = generate_analyst_commentary(
+            research=research,
+            use_cache=True,
+        )
+        analyst_commentary = analyst_commentary_model.model_dump()
+    except Exception as exc:
+        analyst_commentary = {
+            "executive_summary": {
+                "text": (
+                    "AI analyst commentary was unavailable for this report run. "
+                    "The structured financial, market, and SEC data remain available."
+                ),
+                "evidence_ids": [],
+                "confidence": "low",
+            },
+            "limitations": [
+                f"Assembler AI fallback: {type(exc).__name__}: {exc}"
+            ],
+        }
+
+    if profile.include_valuation:
+        saved_valuation = load_latest_valuation(
+            normalized_ticker
+        )
+
+        valuation = adapt_saved_valuation_for_report(
+            saved_valuation
+        )
+
+        valuation["ticker"] = normalized_ticker
+        valuation["saved_model_found"] = (
+            saved_valuation is not None
+        )
+    else:
+        saved_valuation = None
+        valuation = {
+            "status": "excluded",
+            "reason": (
+                "Valuation is not included in the "
+                f"{profile.display_name}."
+            ),
+            "ticker": normalized_ticker,
+            "saved_model_found": False,
+        }
+        valuation_multiples = []
+
+    charts = generate_financial_charts(
+        ticker=normalized_ticker,
+        income_statement=income_statement,
+        balance_sheet=balance_sheet,
+        market_snapshot=market_snapshot,
+        report_brand=brand,
+    )
+
+    sec_filings = sec.get("filings", {})
+    recent_filings = sec_filings.get("recent", [])
+
+    sec_table: list[list[Any]] = [
+        ["Form", "Filing Date", "Report Date", "Primary Document"]
+    ]
+
+    for filing in recent_filings[:8]:
+        sec_table.append(
+            [
+                filing.get("form", "N/A"),
+                filing.get("filing_date", "N/A"),
+                filing.get("report_date", "N/A"),
+                filing.get("primary_document", "N/A"),
+            ]
+        )
+
+    raw_snapshot = {
+        "Company": company_name,
+        "Ticker": normalized_ticker,
+        "Exchange": company.get("exchange", "N/A"),
+        "Sector": company.get("sector", "N/A"),
+        "Industry": industry,
+        "Headquarters": company.get("headquarters", "N/A"),
+        "Website": company.get("website", "N/A"),
+        "SEC CIK": sec_filings.get("cik", "N/A"),
+        "SEC SIC": sec_filings.get("sic_description", "N/A"),
+        "Stage": company.get("stage", "N/A"),
+        "Prepared By": "Veles Analytics",
+        "Date": today,
+    }
+
+    dashboard_metrics = [
+        MetricCard(
+            label="Share Price",
+            value=str(market_metrics.get("Share Price", "N/A")),
+            note="Latest provider value",
+        ),
+        MetricCard(
+            label="Market Cap",
+            value=str(market_metrics.get("Market Cap", "N/A")),
+            note="Equity value",
+        ),
+        MetricCard(
+            label="Enterprise Value",
+            value=str(market_metrics.get("Enterprise Value", "N/A")),
+            note="Market cap adjusted for cash and debt",
+        ),
+        MetricCard(
+            label="Revenue",
+            value=revenue,
+            note="Latest annual period",
+        ),
+        MetricCard(
+            label="Cash",
+            value=cash,
+            note="Cash and equivalents",
+        ),
+        MetricCard(
+            label="Total Debt",
+            value=debt,
+            note="Latest available period",
+        ),
+        MetricCard(
+            label="Free Cash Flow",
+            value=free_cash_flow,
+            note="Latest annual period",
+        ),
+        MetricCard(
+            label="Estimated Runway",
+            value=estimated_runway,
+            note="Cash divided by annual free-cash-flow burn",
+        ),
+    ]
+
+    dashboard_business = {
+        "Sector": str(company.get("sector", "N/A")),
+        "Industry": str(industry),
+        "Headquarters": str(company.get("headquarters", "N/A")),
+        "Stage": str(company.get("stage", "N/A")),
+        "Website": str(company.get("website", "N/A")),
+    }
+
+    dashboard_investment = {
+        "Latest Filing": _latest_filing_summary(recent_filings),
+        "R&D Expense": rd_expense,
+        "Net Income": net_income,
+        "52-Week Range": (
+            f"{market_metrics.get('52-Week Low', 'N/A')} – "
+            f"{market_metrics.get('52-Week High', 'N/A')}"
+        ),
+        "Primary Risk": "Execution, clinical development, and financing risk",
+    }
+
+    ai_limitations = analyst_commentary.get("limitations", [])
+    ai_failed = any(
+        phrase in str(item).lower()
+        for item in ai_limitations
+        for phrase in [
+            "timed out",
+            "timeout",
+            "unavailable",
+            "failed",
+            "not configured",
+            "disabled",
+        ]
+    )
+
+    if profile.name == "basic":
+        toc_items = [
+            "1. Executive Summary",
+            "2. Company Overview",
+            "3. Business Model",
+            "4. Industry Overview",
+            "5. Historical Financial Performance",
+            "6. Revenue Analysis",
+            "7. Cash, Liquidity & Debt",
+            "8. SEC Filing Highlights",
+            "9. Key Risks",
+            "10. Potential Catalysts",
+            "11. Conclusion",
+            "12. Sources",
+            "13. Disclaimer",
+        ]
+
+        report_sections = [
+            ReportSection(
+                heading="Company Overview",
+                body=company.get(
+                    "description",
+                    "Company description unavailable.",
+                ),
+            ),
+            ReportSection(
+                heading="Business Model",
+                body=_shorten_business_model(company_name, industry),
+            ),
+            ReportSection(
+                heading="Industry Overview",
+                body=(
+                    f"{company_name} operates in {industry}. Competitive position "
+                    "depends on execution quality, differentiation, capital access, "
+                    "regulatory progress, and the ability to convert technical "
+                    "capabilities into durable commercial outcomes."
+                ),
+            ),
+            ReportSection(
+                heading="Historical Financial Performance",
+                body=executive_summary.get(
+                    "financial_analysis",
+                    "Historical financial analysis unavailable.",
+                ),
+            ),
+            ReportSection(
+                heading="Revenue Analysis",
+                body=(
+                    f"Latest reported revenue is {revenue}. Analysis should focus "
+                    "on growth, composition, recurring versus milestone-driven "
+                    "revenue, customer concentration, and visibility."
+                ),
+            ),
+            ReportSection(
+                heading="Cash, Liquidity & Debt",
+                body=(
+                    f"Latest cash and equivalents are {cash}, total debt is {debt}, "
+                    f"and estimated cash runway is {estimated_runway}."
+                ),
+            ),
+            ReportSection(
+                heading="SEC Filing Highlights",
+                body=(
+                    f"The latest retrieved filing is {latest_filing}. Recent filings "
+                    "should be reviewed for material operating, financing, insider, "
+                    "and risk-factor disclosures."
+                ),
+            ),
+            ReportSection(
+                heading="Key Risks",
+                body="; ".join([
+                    "Clinical and product-development execution risk",
+                    "Financing requirements and potential shareholder dilution",
+                    "Competitive and regulatory uncertainty",
+                    "Difficulty converting platform capabilities into durable revenue",
+                ]),
+            ),
+            ReportSection(
+                heading="Potential Catalysts",
+                body=(
+                    "Potential catalysts include operating milestones, partnership "
+                    "announcements, clinical or product progress, regulatory events, "
+                    "financing developments, and evidence of improving revenue quality."
+                ),
+            ),
+            ReportSection(
+                heading="Conclusion",
+                body=(
+                    f"{company_name} should be evaluated through execution, liquidity, "
+                    "revenue quality, strategic validation, and risk-adjusted progress. "
+                    "This Basic report intentionally excludes valuation conclusions, "
+                    "ratings, and price targets."
+                ),
+            ),
+            ReportSection(
+                heading="Sources",
+                body=(
+                    "Primary sources include company disclosures, financial statements, "
+                    "market-data providers, and SEC EDGAR filings retrieved by Veles."
+                ),
+            ),
+            ReportSection(
+                heading="Disclaimer",
+                body=(
+                    "This report is for informational purposes only. It is not investment "
+                    "advice or a recommendation to buy or sell securities."
+                ),
+            ),
+        ]
+    else:
+        toc_items = [
+            "1. Executive Dashboard",
+            "2. Executive Summary",
+        ]
+
+        if not ai_failed:
+            toc_items.append("3. AI Analyst Commentary")
+
+        remaining_sections = [
+            "Company Snapshot",
+            "Investment Thesis & Key Risks",
+            "Financial and Market Charts",
+            "Financial Overview",
+            "SEC Filings Snapshot",
+            "Market Data & Valuation Multiples",
+            "Company Overview",
+            "Business Model",
+            "Technology & Platform Analysis",
+            "Valuation Discussion",
+            "Disclaimer",
+        ]
+
+        start_number = len(toc_items) + 1
+
+        toc_items.extend(
+            f"{index}. {title}"
+            for index, title in enumerate(
+                remaining_sections,
+                start=start_number,
+            )
+        )
+
+        report_sections = [
+            ReportSection(
+                heading="Company Overview",
+                body=company.get(
+                    "description",
+                    "Company description unavailable.",
+                ),
+            ),
+            ReportSection(
+                heading="Business Model",
+                body=_shorten_business_model(company_name, industry),
+            ),
+            ReportSection(
+                heading="Technology & Platform Analysis",
+                body=(
+                    "This section will be generated by the Veles AI Research "
+                    "Writer using SEC filings, company disclosures, financial "
+                    "data, clinical intelligence, and competitive evidence."
+                ),
+            ),
+            ReportSection(
+                heading="Valuation Discussion",
+                body=(
+                    "The next valuation integration will combine the existing "
+                    "Veles DCF engine, comparable-company analysis, scenario "
+                    "modeling, and sensitivity analysis."
+                ),
+            ),
+            ReportSection(
+                heading="Disclaimer",
+                body=(
+                    "This report is for informational and portfolio demonstration "
+                    "purposes only. It is not investment advice or a recommendation "
+                    "to buy or sell securities."
+                ),
+            ),
+        ]
+
+        if valuation.get("status") == "available":
+            report_sections = [
+                section
+                for section in report_sections
+                if getattr(section, "heading", "")
+                != "Valuation Discussion"
+            ]
+
+    return ReportDocument(
+        company_name=company_name,
+        ticker=normalized_ticker,
+        industry=industry,
+        date=today,
+        toc_items=toc_items,
+        snapshot=_clean_snapshot(raw_snapshot),
+        dashboard_metrics=dashboard_metrics,
+        dashboard_business={
+            key: value
+            for key, value in dashboard_business.items()
+            if value not in HIDDEN_VALUES
+        },
+        dashboard_investment={
+            key: value
+            for key, value in dashboard_investment.items()
+            if value not in HIDDEN_VALUES
+        },
+        report_brand=brand,
+        report_profile=profile.to_dict(),
+        executive_summary=executive_summary,
+        analyst_commentary=analyst_commentary,
+        valuation=valuation,
+        charts=charts,
+        thesis_points=[
+            (
+                f"{company_name} operates in {industry}, where technical "
+                "differentiation and execution quality are central to value creation."
+            ),
+            (
+                "The company should be evaluated through platform validation, "
+                "revenue quality, capital efficiency, strategic partnerships, "
+                "and pipeline execution."
+            ),
+            (
+                "The investment profile remains speculative because future value "
+                "depends on translating scientific capabilities into durable "
+                "commercial and clinical outcomes."
+            ),
+        ],
+        risks=[
+            "Clinical and product-development execution risk",
+            "Financing requirements and potential shareholder dilution",
+            "Competitive pressure from biotechnology and pharmaceutical peers",
+            "Regulatory and reimbursement uncertainty",
+            "Difficulty converting platform capabilities into durable revenue",
+        ],
+        show_competitors=False,
+        financial_table=[
+            ["Metric", "Analytical Focus"],
+            ["Revenue", "Growth rate, composition, and partnership dependence"],
+            ["Cash Runway", "Liquidity relative to annual operating cash burn"],
+            ["R&D Investment", "Research intensity and pipeline-development strategy"],
+            ["Profitability", "Operating leverage and path toward sustainability"],
+        ],
+        income_statement=income_statement,
+        balance_sheet=balance_sheet,
+        cash_flow=cash_flow,
+        financial_commentary=[
+            executive_summary.get(
+                "financial_analysis",
+                "Financial analysis unavailable.",
+            )
+        ],
+        market_snapshot=market_snapshot,
+        valuation_multiples=valuation_multiples,
+        market_commentary=[
+            (
+                "The gap between market capitalization and enterprise value "
+                "reflects the company’s net cash position. Valuation multiples "
+                "remain elevated relative to current revenue and should be "
+                "interpreted in the context of pipeline potential, strategic "
+                "partnerships, and development risk."
+            )
+        ],
+        sec_filings_table=sec_table,
+        sec_commentary=[
+            (
+                "Recent SEC filings were retrieved directly from the "
+                f"{sec_filings.get('source', 'SEC EDGAR')}."
+            ),
+            (
+                "Forms 4 and 144 generally relate to insider ownership activity "
+                "and proposed securities sales rather than operating performance."
+            ),
+        ],
+        metadata={
+            **research.get("metadata", {}),
+            "report_profile": profile.to_dict(),
+        },
+        sections=report_sections,
+    )

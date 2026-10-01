@@ -1,0 +1,809 @@
+from __future__ import annotations
+
+from pathlib import Path
+from html import unescape
+from typing import Any
+from xml.sax.saxutils import escape
+
+from reportlab.lib import colors
+from reportlab.lib.pagesizes import letter
+from reportlab.lib.styles import ParagraphStyle, getSampleStyleSheet
+from reportlab.lib.units import inch
+from reportlab.platypus import (
+    Image,
+    KeepTogether,
+    PageBreak,
+    Paragraph,
+    SimpleDocTemplate,
+    Spacer,
+    Table,
+    TableStyle,
+)
+
+
+from services.pdf import (
+    VELES_PDF_THEME,
+    VelesReportDocument,
+    analyst_callout,
+    build_automatic_toc,
+    build_cover,
+    build_dashboard_v2,
+    build_pdf_styles,
+    build_professional_appendix,
+    build_table,
+    build_valuation_section,
+    figure_reference,
+    make_footer_callback,
+    report_figure,
+    section_header_bar,
+    three_column_callouts,
+)
+
+BRAND_DARK = colors.HexColor("#0F172A")
+BRAND_BLUE = colors.HexColor("#1D4ED8")
+BRAND_GRAY = colors.HexColor("#64748B")
+BRAND_BORDER = colors.HexColor("#CBD5E1")
+LIGHT_BG = colors.HexColor("#F8FAFC")
+CARD_BG = colors.HexColor("#F1F5F9")
+
+
+def _clean_text(value: Any) -> str:
+    text_value = unescape(str(value))
+
+    text_value = text_value.replace("R&D;", "R&D")
+    text_value = text_value.replace("SG&A;", "SG&A")
+    text_value = text_value.replace("R&amp;D;", "R&D")
+    text_value = text_value.replace("SG&amp;A;", "SG&A")
+    text_value = text_value.replace("R&D", "R&D")
+    text_value = text_value.replace("R&amp;D", "R&D")
+
+    # Clean common remnants from earlier ReportLab escaping patches.
+    text_value = text_value.replace("R&D", "R&D")
+    text_value = text_value.replace("R&amp;D", "R&D")
+    text_value = text_value.replace("&amp;", "&")
+
+    return text_value
+
+
+def _paragraph_text(value: Any) -> str:
+    return escape(_clean_text(value))
+
+
+def _sanitize_table(data):
+    if not data:
+        return data
+
+    return [
+        [
+            _clean_text(cell)
+            if isinstance(cell, str)
+            else cell
+            for cell in row
+        ]
+        for row in data
+    ]
+
+
+def _as_dict(report: Any) -> dict[str, Any]:
+    if hasattr(report, "to_dict"):
+        return report.to_dict()
+
+    return report
+
+
+def _footer(canvas, doc) -> None:
+    callback = make_footer_callback(
+        report_type="Equity Research",
+        confidentiality="Independent Research",
+    )
+    callback(canvas, doc)
+
+
+def _table(
+    data,
+    col_widths=None,
+    numeric_columns=None,
+):
+    return build_table(
+        _sanitize_table(data),
+        col_widths=col_widths,
+        numeric_columns=set(numeric_columns or []),
+    )
+
+
+def _metric_card(metric: dict[str, Any], styles: dict[str, ParagraphStyle]):
+    value = str(metric.get("value", "N/A"))
+    label = str(metric.get("label", "Metric"))
+    note = str(metric.get("note", ""))
+
+    card_content = [
+        Paragraph(escape(label), styles["card_label"]),
+        Paragraph(escape(value), styles["card_value"]),
+        Paragraph(escape(note), styles["card_note"]),
+    ]
+
+    card = Table(
+        [[card_content]],
+        colWidths=[3.25 * inch],
+        rowHeights=[0.9 * inch],
+    )
+
+    card.setStyle(
+        TableStyle(
+            [
+                ("BACKGROUND", (0, 0), (-1, -1), CARD_BG),
+                ("BOX", (0, 0), (-1, -1), 0.6, BRAND_BORDER),
+                ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+                ("LEFTPADDING", (0, 0), (-1, -1), 10),
+                ("RIGHTPADDING", (0, 0), (-1, -1), 10),
+                ("TOPPADDING", (0, 0), (-1, -1), 8),
+                ("BOTTOMPADDING", (0, 0), (-1, -1), 8),
+            ]
+        )
+    )
+
+    return card
+
+
+def _dashboard_key_value_table(
+    title: str,
+    values: dict[str, Any],
+    styles: dict[str, ParagraphStyle],
+):
+    rows = [[Paragraph(title, styles["dashboard_subheading"]), ""]]
+
+    for key, value in values.items():
+        rows.append(
+            [
+                Paragraph(escape(str(key)), styles["dashboard_label"]),
+                Paragraph(escape(str(value)), styles["dashboard_value"]),
+            ]
+        )
+
+    table = Table(
+        rows,
+        colWidths=[1.45 * inch, 1.8 * inch],
+    )
+
+    table.setStyle(
+        TableStyle(
+            [
+                ("SPAN", (0, 0), (1, 0)),
+                ("BACKGROUND", (0, 0), (1, 0), BRAND_DARK),
+                ("TEXTCOLOR", (0, 0), (1, 0), colors.white),
+                ("BOX", (0, 0), (-1, -1), 0.5, BRAND_BORDER),
+                ("INNERGRID", (0, 1), (-1, -1), 0.25, BRAND_BORDER),
+                ("VALIGN", (0, 0), (-1, -1), "TOP"),
+                ("LEFTPADDING", (0, 0), (-1, -1), 7),
+                ("RIGHTPADDING", (0, 0), (-1, -1), 7),
+                ("TOPPADDING", (0, 0), (-1, -1), 6),
+                ("BOTTOMPADDING", (0, 0), (-1, -1), 6),
+            ]
+        )
+    )
+
+    return table
+
+
+def export_equity_report_pdf_v2(report, output_path):
+    report = _as_dict(report)
+    report_brand = report.get("report_brand", {})
+    logo_path = report_brand.get("logo_path")
+
+    primary_color = colors.HexColor(
+        report_brand.get("primary", "#0F172A")
+    )
+    secondary_color = colors.HexColor(
+        report_brand.get("secondary", "#1D4ED8")
+    )
+    accent_color = colors.HexColor(
+        report_brand.get("accent", "#60A5FA")
+    )
+    card_background = colors.HexColor(
+        report_brand.get("card_background", "#F1F5F9")
+    )
+    border_color = colors.HexColor(
+        report_brand.get("border", "#CBD5E1")
+    )
+
+    output_path = Path(output_path)
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+
+    footer_callback = make_footer_callback(
+        report_type="Equity Research",
+        confidentiality="Independent Research",
+    )
+
+    doc = VelesReportDocument(
+        str(output_path),
+        footer_callback=footer_callback,
+        theme=VELES_PDF_THEME,
+    )
+
+
+    styles = build_pdf_styles(VELES_PDF_THEME)
+
+    story = []
+
+    # Cover page
+    story.extend(
+        build_cover(
+            report,
+            styles,
+            theme=VELES_PDF_THEME,
+        )
+    )
+    story.append(PageBreak())
+
+    # Executive Dashboard
+    story.extend(
+        build_dashboard_v2(
+            report,
+            styles,
+            theme=VELES_PDF_THEME,
+        )
+    )
+    story.append(PageBreak())
+
+    # Executive Summary
+    summary = report.get("executive_summary", {})
+
+    if summary:
+        story.append(
+            section_header_bar(
+                "Executive Summary",
+                styles,
+                subtitle="Investment framing, financial position, and key scenarios",
+            )
+        )
+        story.append(
+            Paragraph(
+                summary.get("overview", ""),
+                styles["body"],
+            )
+        )
+
+        story.append(
+            Paragraph(
+                "Financial Assessment",
+                styles["h2"],
+            )
+        )
+        story.append(
+            Paragraph(
+                summary.get("financial_analysis", ""),
+                styles["body"],
+            )
+        )
+
+        bull_text = "\n".join(
+            f"• {item}"
+            for item in summary.get("bull_case", [])
+        )
+        bear_text = "\n".join(
+            f"• {item}"
+            for item in summary.get("bear_case", [])
+        )
+        catalyst_text = "\n".join(
+            f"• {item}"
+            for item in summary.get("key_catalysts", [])
+        )
+
+        story.append(
+            three_column_callouts(
+                (
+                    "Bull Case",
+                    bull_text,
+                    "positive",
+                ),
+                (
+                    "Bear Case",
+                    bear_text,
+                    "negative",
+                ),
+                (
+                    "Key Catalysts",
+                    catalyst_text,
+                    "insight",
+                ),
+                styles,
+            )
+        )
+        story.append(Spacer(1, 0.18 * inch))
+
+        story.append(
+            Paragraph(
+                (
+                    "<b>Latest SEC filing:</b> "
+                    + summary.get("latest_filing", "N/A")
+                ),
+                styles["body"],
+            )
+        )
+
+        story.append(PageBreak())
+
+    # AI Analyst Commentary
+    commentary = report.get("analyst_commentary", {})
+    limitations = commentary.get("limitations", []) if commentary else []
+
+    ai_failed = any(
+        phrase in str(item).lower()
+        for item in limitations
+        for phrase in [
+            "timed out",
+            "timeout",
+            "unavailable",
+            "failed",
+            "not configured",
+            "disabled",
+        ]
+    )
+
+    if commentary and not ai_failed:
+        story.append(
+            Paragraph(
+                "AI Analyst Commentary",
+                styles["h1"],
+            )
+        )
+        story.append(
+            Paragraph(
+                (
+                    "The following analysis is generated exclusively from "
+                    "the normalized evidence included in this report."
+                ),
+                styles["subtitle"],
+            )
+        )
+
+        commentary_sections = [
+            ("Executive Assessment", "executive_summary"),
+            ("Revenue Analysis", "revenue_analysis"),
+            (
+                "Research Spending Analysis",
+                "research_spending_analysis",
+            ),
+            ("Liquidity Analysis", "liquidity_analysis"),
+            ("Profitability Analysis", "profitability_analysis"),
+            (
+                "Market Valuation Analysis",
+                "market_valuation_analysis",
+            ),
+            ("SEC Filing Analysis", "sec_filing_analysis"),
+            ("Risk Assessment", "risk_assessment"),
+            ("Catalyst Assessment", "catalyst_assessment"),
+        ]
+
+        for title, key in commentary_sections:
+            section = commentary.get(key, {})
+            section_text = section.get("text", "")
+            evidence_ids = section.get("evidence_ids", [])
+            confidence = section.get("confidence", "low")
+
+            if not section_text:
+                continue
+
+            evidence_text = (
+                ", ".join(evidence_ids)
+                if evidence_ids
+                else "No supporting evidence IDs"
+            )
+
+            story.append(
+                KeepTogether([
+                    Paragraph(title, styles["h2"]),
+                    Paragraph(section_text, styles["body"]),
+                    Paragraph(
+                        (
+                            f"<b>Evidence:</b> {evidence_text}<br/>"
+                            f"<b>Confidence:</b> {confidence.title()}"
+                        ),
+                        styles["small"],
+                    ),
+                    Spacer(1, 0.12 * inch),
+                ])
+            )
+
+        if limitations:
+            story.append(
+                Paragraph(
+                    "Data Limitations",
+                    styles["h2"],
+                )
+            )
+
+            for limitation in limitations:
+                story.append(
+                    Paragraph(
+                        f"• {limitation}",
+                        styles["small"],
+                    )
+                )
+
+        story.append(PageBreak())
+
+    # Automatic table of contents
+    story.extend(
+        build_automatic_toc(
+            styles,
+            theme=VELES_PDF_THEME,
+        )
+    )
+    story.append(PageBreak())
+
+    # Company Snapshot
+    snapshot_data = [["Field", "Value"]] + [
+        [key, value]
+        for key, value in report.get("snapshot", {}).items()
+    ]
+
+    story.append(
+        section_header_bar(
+            "Company Snapshot",
+            styles,
+            subtitle="Corporate identity and reporting profile",
+        )
+    )
+    story.append(
+        _table(
+            snapshot_data,
+            [2.0 * inch, 4.8 * inch],
+        )
+    )
+    story.append(Spacer(1, 0.18 * inch))
+
+    story.append(Paragraph("Investment Thesis", styles["h1"]))
+
+    for point in report.get("thesis_points", []):
+        story.append(
+            Paragraph(
+                f"• {point}",
+                styles["body"],
+            )
+        )
+
+    story.append(Paragraph("Key Risks", styles["h2"]))
+
+    for risk in report.get("risks", []):
+        story.append(
+            Paragraph(
+                f"• {risk}",
+                styles["body"],
+            )
+        )
+
+    story.append(PageBreak())
+
+    # Financial and market charts
+    charts = report.get("charts", {})
+
+    if charts:
+        story.append(
+            section_header_bar(
+                "Financial and Market Charts",
+                styles,
+                subtitle=(
+                    "Historical financial trends and current "
+                    "balance-sheet and market-value comparisons"
+                ),
+            )
+        )
+
+        figure_number = 1
+
+        chart_order = [
+            ("revenue_trend", "Revenue Trend"),
+            ("rd_expense_trend", "R&D Expense Trend"),
+            (
+                "operating_net_loss_trend",
+                "Operating and Net Loss Trend",
+            ),
+            ("cash_vs_debt", "Cash Versus Debt"),
+            (
+                "market_cap_vs_ev",
+                "Market Capitalization Versus Enterprise Value",
+            ),
+        ]
+
+        valid_charts = [
+            (chart_key, chart_title, charts.get(chart_key))
+            for chart_key, chart_title in chart_order
+            if charts.get(chart_key)
+            and Path(charts.get(chart_key)).exists()
+        ]
+
+        figure_number = 1
+
+        for index, (_, chart_title, chart_path) in enumerate(valid_charts):
+            # Begin page two after Revenue and R&D.
+            if index == 2:
+                story.append(PageBreak())
+
+            # Begin page three after Operating Loss and Cash/Debt.
+            if index == 4:
+                story.append(PageBreak())
+
+            is_final_chart = index == len(valid_charts) - 1
+
+            story.append(
+                report_figure(
+                    chart_path,
+                    figure_number=figure_number,
+                    title=chart_title,
+                    styles=styles,
+                    width=6.45 * inch,
+                    height=(
+                        2.25 * inch
+                        if is_final_chart
+                        else 2.55 * inch
+                    ),
+                    source=(
+                        "Veles Analytics calculations using normalized "
+                        "financial and market data."
+                    ),
+                )
+            )
+
+            figure_number += 1
+
+        # Do not force a new page after the final chart.
+        # Financial Overview begins below it when space allows.
+
+    # Financials
+    story.append(
+        Paragraph(
+            (
+                "Revenue increased across the available annual periods, "
+                "while research spending and operating losses also expanded. "
+                f"See {figure_reference(1)}, {figure_reference(2)}, "
+                f"and {figure_reference(3)}."
+            ),
+            styles["body"],
+        )
+    )
+    story.append(Spacer(1, 0.08 * inch))
+    story.append(
+        section_header_bar(
+            "Financial Overview",
+            styles,
+            subtitle="Historical statements, liquidity, and operating performance",
+        )
+    )
+    story.append(
+        _table(
+            report.get("financial_table", []),
+            [1.7 * inch, 5.1 * inch],
+        )
+    )
+    story.append(Spacer(1, 0.16 * inch))
+
+    if report.get("income_statement"):
+        story.append(
+            Paragraph(
+                "Income Statement Snapshot",
+                styles["h2"],
+            )
+        )
+        story.append(
+            _table(
+                report["income_statement"],
+                [
+                    1.75 * inch,
+                    1.68 * inch,
+                    1.68 * inch,
+                    1.68 * inch,
+                ],
+            )
+        )
+        story.append(Spacer(1, 0.16 * inch))
+
+    if report.get("balance_sheet"):
+        story.append(
+            Paragraph(
+                "Balance Sheet Snapshot",
+                styles["h2"],
+            )
+        )
+        story.append(
+            _table(
+                report["balance_sheet"],
+                [2.4 * inch, 4.4 * inch],
+            )
+        )
+        story.append(Spacer(1, 0.16 * inch))
+
+    if report.get("cash_flow"):
+        story.append(
+            Paragraph(
+                "Cash Flow Snapshot",
+                styles["h2"],
+            )
+        )
+        story.append(
+            _table(
+                report["cash_flow"],
+                [2.4 * inch, 4.4 * inch],
+            )
+        )
+        story.append(Spacer(1, 0.16 * inch))
+
+    # Financial Assessment is shown once in the Executive Summary.
+    story.append(PageBreak())
+
+    # SEC
+    if (
+        report.get("sec_filings_table")
+        and len(report["sec_filings_table"]) > 1
+    ):
+        story.append(
+            section_header_bar(
+                "SEC Filings Snapshot",
+                styles,
+                subtitle="Recent regulatory filings and ownership-related disclosures",
+            )
+        )
+        story.append(
+            _table(
+                report["sec_filings_table"],
+                [
+                    0.9 * inch,
+                    1.2 * inch,
+                    1.2 * inch,
+                    3.5 * inch,
+                ],
+            )
+        )
+        story.append(Spacer(1, 0.16 * inch))
+
+    if report.get("sec_commentary"):
+        story.append(
+            Paragraph(
+                "SEC Commentary",
+                styles["h2"],
+            )
+        )
+
+        for item in report["sec_commentary"]:
+            story.append(
+                Paragraph(
+                    f"• {_paragraph_text(item)}",
+                    styles["body"],
+                )
+            )
+
+    story.append(PageBreak())
+
+    # Market data
+    story.append(
+        Paragraph(
+            (
+                "The company retains a material net-cash position, which "
+                "contributes to enterprise value remaining below market "
+                f"capitalization. See {figure_reference(4)} and "
+                f"{figure_reference(5)}."
+            ),
+            styles["body"],
+        )
+    )
+    story.append(Spacer(1, 0.08 * inch))
+    if report.get("market_snapshot"):
+        story.append(
+            section_header_bar(
+                "Market Data and Valuation",
+                styles,
+                subtitle="Trading profile, enterprise value, and market multiples",
+            )
+        )
+        story.append(
+            _table(
+                report["market_snapshot"],
+                [2.3 * inch, 4.5 * inch],
+            )
+        )
+        story.append(Spacer(1, 0.16 * inch))
+
+    if report.get("valuation_multiples"):
+        story.append(
+            Paragraph(
+                "Valuation Multiples",
+                styles["h2"],
+            )
+        )
+        story.append(
+            _table(
+                report["valuation_multiples"],
+                [2.3 * inch, 4.5 * inch],
+            )
+        )
+        story.append(Spacer(1, 0.16 * inch))
+
+    if report.get("market_commentary"):
+        story.append(
+            Paragraph(
+                "Market Commentary",
+                styles["h2"],
+            )
+        )
+
+        for item in report["market_commentary"]:
+            story.append(
+                Paragraph(
+                    f"• {_paragraph_text(item)}",
+                    styles["body"],
+                )
+            )
+
+    story.append(PageBreak())
+
+    # Narrative sections
+    narrative_subtitles = {
+        "Company Overview": (
+            "Business profile, operating footprint, and development portfolio"
+        ),
+        "Business Model": (
+            "Revenue model, partnerships, and commercialization strategy"
+        ),
+        "Technology & Platform Analysis": (
+            "Scientific platform, differentiation, and technical positioning"
+        ),
+        "Valuation Discussion": (
+            "Valuation framework, assumptions, and scenario considerations"
+        ),
+        "Disclaimer": (
+            "Important research and investment-use limitations"
+        ),
+    }
+
+    for section in report.get("sections", []):
+        heading = section.get("heading", "")
+        body_text = section.get("body", "")
+
+        story.append(
+            section_header_bar(
+                heading,
+                styles,
+                subtitle=narrative_subtitles.get(heading, ""),
+            )
+        )
+
+        story.append(
+            Paragraph(
+                _paragraph_text(body_text).replace("\n", "<br/>"),
+                styles["body"],
+            )
+        )
+
+        story.append(Spacer(1, 0.18 * inch))
+
+    story.append(Spacer(1, 0.18 * inch))
+    story.extend(
+        build_valuation_section(
+            report,
+            styles,
+            theme=VELES_PDF_THEME,
+        )
+    )
+
+    story.extend(
+        build_professional_appendix(
+            report,
+            styles,
+            theme=VELES_PDF_THEME,
+        )
+    )
+
+    story.append(
+        Paragraph(
+            "Generated using Veles Equity Research Engine v3.",
+            styles["small"],
+        )
+    )
+
+    doc.multiBuild(story)
+
+    return str(output_path)
+
+
+def export_equity_report_pdf(report, output_path):
+    return export_equity_report_pdf_v2(report, output_path)

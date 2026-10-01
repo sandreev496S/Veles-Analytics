@@ -1,0 +1,152 @@
+from __future__ import annotations
+
+from services.reports.analyst_assessment import (
+    build_financial_assessment,
+    classify_growth,
+    classify_liquidity,
+)
+from services.reports.analyst_interpretation import (
+    interpret_cash_burn_risk,
+    interpret_revenue_growth,
+)
+from services.reports.analyst_summary import (
+    build_executive_summary,
+)
+
+
+def _validated_metrics(
+    *,
+    cash: float = 250_000_000,
+    debt: float = 25_000_000,
+) -> dict[str, dict[str, object]]:
+    """Build report-safe canonical metrics for summary tests."""
+    return {
+        "cash_and_cash_equivalents": {
+            "value": cash,
+            "validation_status": "verified",
+            "is_safe_for_report": True,
+        },
+        "financial_debt": {
+            "value": debt,
+            "validation_status": "verified",
+            "is_safe_for_report": True,
+        },
+    }
+
+
+def _format_money(value):
+    return f"${value / 1_000_000:.0f}M"
+
+
+def test_growth_classification_is_deterministic():
+    assert classify_growth(69.0) == "strong"
+    assert classify_growth(15.0) == "moderate"
+    assert classify_growth(4.0) == "modest"
+    assert classify_growth(-20.0) == (
+        "material_decline"
+    )
+
+
+def test_liquidity_uses_runway_and_net_cash():
+    classification = classify_liquidity(
+        cash=743_000_000,
+        debt=78_000_000,
+        free_cash_flow=-380_000_000,
+        estimated_runway="2.0 years",
+    )
+
+    assert classification == "strong"
+
+
+def test_revenue_interpretation_explains_significance():
+    text = interpret_revenue_growth(
+        {
+            "classification": "strong",
+            "growth_pct": 69.0,
+        }
+    )
+
+    assert text is not None
+    assert "top-line momentum" in text
+    assert "durability" in text
+    assert "69%" in text
+
+
+def test_cash_burn_interpretation_connects_to_financing():
+    text = interpret_cash_burn_risk(
+        {
+            "free_cash_flow": -380_000_000,
+        },
+        format_money=_format_money,
+    )
+
+    assert text is not None
+    assert "$380M" in text
+    assert "future capital raises" in text
+
+
+def test_assessment_layer_contains_no_narrative_text():
+    assessment = build_financial_assessment(
+        revenue_growth=69.0,
+        rd_growth=97.0,
+        latest_revenue=74_000_000,
+        latest_rd=475_000_000,
+        cash=743_000_000,
+        debt=78_000_000,
+        free_cash_flow=-380_000_000,
+        net_income=-645_000_000,
+        estimated_runway="2.0 years",
+    )
+
+    assert assessment["revenue"]["classification"] == (
+        "strong"
+    )
+    assert assessment["liquidity"]["classification"] == (
+        "strong"
+    )
+    assert assessment["profitability"][
+        "classification"
+    ] == "loss_making_cash_burning"
+
+
+def test_executive_summary_uses_institutional_language():
+    summary = build_executive_summary(
+        company_name="Recursion Pharmaceuticals",
+        ticker="RXRX",
+        exchange="NASDAQ",
+        industry="Biotechnology",
+        company_description=(
+            "Recursion develops a technology-enabled drug "
+            "discovery platform and clinical pipeline."
+        ),
+        income_statement=[
+            ["Metric", "2025", "2023"],
+            ["Revenue", 74000000, 44000000],
+            ["R&D Expense", 475000000, 241000000],
+            ["Net Income", -645000000, -328000000],
+        ],
+        balance_sheet=[
+            ["Metric", "Latest"],
+            ["Cash & Equivalents", "$743M"],
+            ["Total Debt", "$78M"],
+        ],
+        cash_flow=[
+            ["Metric", "Latest"],
+            ["Free Cash Flow", -380000000],
+        ],
+        estimated_runway="2.0 years",
+        latest_filing="10-K — Annual report",
+        validated_metrics=_validated_metrics(),
+    )
+
+    highlights = " ".join(
+        summary["investment_highlights"]
+    )
+    risks = " ".join(
+        summary["key_risks"]
+    )
+
+    assert "top-line momentum" in highlights
+    assert "strategic flexibility" in highlights
+    assert "future capital raises" in risks
+    assert "investor confidence" in risks

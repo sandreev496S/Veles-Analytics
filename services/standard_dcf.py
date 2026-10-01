@@ -1,0 +1,225 @@
+import pandas as pd
+
+
+def run_dcf_case(
+    revenue,
+    years,
+    growth,
+    ebit_margin,
+    tax_rate,
+    da_pct,
+    capex_pct,
+    nwc_pct,
+    discount_rate,
+    terminal_growth,
+    cash,
+    debt,
+    shares,
+    margin_of_safety,
+):
+    rows = []
+    pv_fcf_total = 0
+    current_revenue = revenue
+    previous_revenue = revenue
+
+    for year in range(1, years + 1):
+        current_revenue *= 1 + growth
+        ebit = current_revenue * ebit_margin
+        tax = max(ebit, 0) * tax_rate
+        nopat = ebit - tax
+        da = current_revenue * da_pct
+        capex = current_revenue * capex_pct
+
+        current_nwc = current_revenue * nwc_pct
+        previous_nwc = previous_revenue * nwc_pct
+        delta_nwc = current_nwc - previous_nwc
+
+        fcf = nopat + da - capex - delta_nwc
+
+        previous_revenue = current_revenue
+
+        discount_factor = 1 / ((1 + discount_rate) ** year)
+        pv_fcf = fcf * discount_factor
+        pv_fcf_total += pv_fcf
+
+        rows.append({
+            "Year": year,
+            "Revenue ($M)": current_revenue,
+            "EBIT ($M)": ebit,
+            "NOPAT ($M)": nopat,
+            "D&A ($M)": da,
+            "CapEx ($M)": capex,
+            "ΔNWC ($M)": delta_nwc,
+            "FCFF ($M)": fcf,
+            "PV FCFF ($M)": pv_fcf,
+        })
+
+    final_fcf = rows[-1]["FCFF ($M)"]
+
+    terminal_value = 0
+    if discount_rate > terminal_growth:
+        terminal_value = final_fcf * (1 + terminal_growth) / (discount_rate - terminal_growth)
+
+    pv_terminal_value = terminal_value / ((1 + discount_rate) ** years)
+    enterprise_value = pv_fcf_total + pv_terminal_value
+    equity_value = enterprise_value + cash - debt
+    implied_share_price = equity_value / shares
+    mos_price = implied_share_price * (1 - margin_of_safety)
+
+    terminal_pct = 0
+    if enterprise_value:
+        terminal_pct = pv_terminal_value / enterprise_value
+
+    return pd.DataFrame(rows), {
+        "PV Forecast FCFF ($M)": pv_fcf_total,
+        "PV Terminal Value ($M)": pv_terminal_value,
+        "Enterprise Value ($M)": enterprise_value,
+        "Equity Value ($M)": equity_value,
+        "Implied Share Price ($)": implied_share_price,
+        "Margin of Safety Price ($)": mos_price,
+        "Terminal Value %": terminal_pct,
+    }
+
+
+def calculate_wacc(risk_free_rate, beta, equity_risk_premium, cost_of_debt, tax_rate, equity_value, debt_value):
+    cost_of_equity = risk_free_rate + beta * equity_risk_premium
+    total_capital = equity_value + debt_value
+
+    if total_capital == 0:
+        return 0, cost_of_equity
+
+    equity_weight = equity_value / total_capital
+    debt_weight = debt_value / total_capital
+
+    wacc = equity_weight * cost_of_equity + debt_weight * cost_of_debt * (1 - tax_rate)
+
+    return wacc, cost_of_equity
+
+
+def sensitivity_matrix(
+    revenue,
+    years,
+    growth,
+    ebit_margin,
+    tax_rate,
+    da_pct,
+    capex_pct,
+    nwc_pct,
+    cash,
+    debt,
+    shares,
+    margin_of_safety,
+    base_discount_rate,
+    base_terminal_growth,
+):
+    # Center the sensitivity matrix on the actual Base Case.
+    # WACC: +/- 1pp and +/- 2pp.
+    # Terminal growth: +/- 0.5pp and +/- 1pp.
+    discount_rates = [
+        max(base_discount_rate - 0.02, 0.001),
+        max(base_discount_rate - 0.01, 0.001),
+        base_discount_rate,
+        base_discount_rate + 0.01,
+        base_discount_rate + 0.02,
+    ]
+
+    terminal_growths = [
+        max(base_terminal_growth - 0.01, 0.0),
+        max(base_terminal_growth - 0.005, 0.0),
+        base_terminal_growth,
+        base_terminal_growth + 0.005,
+        base_terminal_growth + 0.01,
+    ]
+
+    matrix = {}
+
+    for discount_rate in discount_rates:
+        row = {}
+
+        for terminal_growth in terminal_growths:
+            _, valuation = run_dcf_case(
+                revenue=revenue,
+                years=years,
+                growth=growth,
+                ebit_margin=ebit_margin,
+                tax_rate=tax_rate,
+                da_pct=da_pct,
+                capex_pct=capex_pct,
+                nwc_pct=nwc_pct,
+                discount_rate=discount_rate,
+                terminal_growth=terminal_growth,
+                cash=cash,
+                debt=debt,
+                shares=shares,
+                margin_of_safety=margin_of_safety,
+            )
+
+            row[f"{terminal_growth:.1%}"] = valuation["Implied Share Price ($)"]
+
+        matrix[f"{discount_rate:.1%}"] = row
+
+    return pd.DataFrame(matrix).T
+
+
+def reverse_dcf_growth(
+    target_equity_value,
+    revenue,
+    years,
+    ebit_margin,
+    tax_rate,
+    da_pct,
+    capex_pct,
+    nwc_pct,
+    discount_rate,
+    terminal_growth,
+    cash,
+    debt,
+    shares,
+    margin_of_safety,
+):
+    low = -0.20
+    high = 0.50
+
+    for _ in range(80):
+        mid = (low + high) / 2
+
+        _, valuation = run_dcf_case(
+            revenue=revenue,
+            years=years,
+            growth=mid,
+            ebit_margin=ebit_margin,
+            tax_rate=tax_rate,
+            da_pct=da_pct,
+            capex_pct=capex_pct,
+            nwc_pct=nwc_pct,
+            discount_rate=discount_rate,
+            terminal_growth=terminal_growth,
+            cash=cash,
+            debt=debt,
+            shares=shares,
+            margin_of_safety=margin_of_safety,
+        )
+
+        if valuation["Equity Value ($M)"] < target_equity_value:
+            low = mid
+        else:
+            high = mid
+
+    return (low + high) / 2
+
+
+def comparable_valuation(revenue, ebitda, net_income, comparables):
+    df = pd.DataFrame(comparables)
+
+    median_ev_revenue = df["EV/Revenue"].median()
+    median_ev_ebitda = df["EV/EBITDA"].median()
+    median_pe = df["P/E"].median()
+
+    return df, {
+        "Median EV/Revenue": median_ev_revenue,
+        "Median EV/EBITDA": median_ev_ebitda,
+        "Median P/E": median_pe,
+        "Implied EV from Revenue ($M)": revenue * median_ev_revenue,
+        "Implied EV from EBITDA ($M)": ebitda * median_ev_ebitda,
+        "Implied Equity from P/E ($M)": net_income * median_pe,
+    }

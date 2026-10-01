@@ -1,0 +1,1470 @@
+import math
+from io import BytesIO
+import xlsxwriter
+
+
+def create_standard_dcf_excel(
+    company_name,
+    summary_df,
+    forecast_df,
+    sensitivity_df,
+    comps_df=None,
+    comps_summary_df=None,
+    valuation_crosscheck_df=None,
+    scenarios=None,
+    company_inputs=None,
+    wacc_inputs=None,
+):
+    output = BytesIO()
+
+    # --------------------------------------------------------------
+    # LIVE MODEL STATE
+    # Excel must consume the same assumptions/results as Step 5.
+    # No independent valuation assumptions should be invented here.
+    # --------------------------------------------------------------
+    scenarios = scenarios or {}
+    company_inputs = company_inputs or {}
+    wacc_inputs = wacc_inputs or {}
+
+    base_scenario = scenarios.get("Base Case", {})
+
+    def _num(mapping, *keys, default=0.0):
+        for key in keys:
+            if key in mapping and mapping[key] is not None:
+                try:
+                    return float(mapping[key])
+                except (TypeError, ValueError):
+                    pass
+        return float(default)
+
+    starting_revenue_live = _num(
+        company_inputs,
+        "starting_revenue",
+        default=float(forecast_df["Revenue ($M)"].iloc[0]),
+    )
+    cash_live = _num(company_inputs, "cash")
+    debt_live = _num(company_inputs, "debt")
+    shares_live = _num(company_inputs, "shares")
+    current_market_cap_live = _num(company_inputs, "current_market_cap")
+
+    revenue_growth_live = _num(
+        base_scenario, "revenue_growth", "growth", default=0.0
+    )
+    ebit_margin_live = _num(
+        base_scenario, "ebit_margin", default=0.0
+    )
+    tax_rate_live = _num(
+        base_scenario, "tax_rate", default=0.21
+    )
+    da_pct_live = _num(
+        base_scenario, "da_pct", "d_and_a_pct", default=0.03
+    )
+    capex_pct_live = _num(
+        base_scenario, "capex_pct", default=0.0
+    )
+    nwc_pct_live = _num(
+        base_scenario, "nwc_pct", default=0.0
+    )
+    discount_rate_live = _num(
+        base_scenario, "discount_rate", "wacc", default=0.0
+    )
+    terminal_growth_live = _num(
+        base_scenario, "terminal_growth", "terminal_growth_rate", default=0.025
+    )
+
+    risk_free_live = _num(
+        wacc_inputs, "risk_free_rate", default=0.045
+    )
+    beta_live = _num(
+        wacc_inputs, "beta", default=1.0
+    )
+    erp_live = _num(
+        wacc_inputs, "equity_risk_premium", default=0.055
+    )
+    pretax_debt_live = _num(
+        wacc_inputs, "pre_tax_cost_of_debt", "pretax_cost_of_debt", default=0.06
+    )
+    wacc_tax_live = _num(
+        wacc_inputs, "tax_rate", default=tax_rate_live
+    )
+    equity_value_live = _num(
+        wacc_inputs,
+        "market_value_equity",
+        "market_value_of_equity",
+        default=current_market_cap_live,
+    )
+    debt_value_live = _num(
+        wacc_inputs,
+        "market_value_debt",
+        "market_value_of_debt",
+        default=debt_live,
+    )
+
+    workbook = xlsxwriter.Workbook(output, {"in_memory": True})
+
+    # Colors
+    navy = "#12151A"
+    dark = "#2B303A"
+    blue = "#0000FF"
+    green = "#008000"
+    white = "#FFFFFF"
+    yellow = "#FFF2CC"
+    light_blue = "#D9EAF7"
+    gray = "#F3F6F8"
+
+    # Formats
+    title_fmt = workbook.add_format({
+        "bold": True,
+        "font_size": 20,
+        "font_color": navy,
+    })
+
+    subtitle_fmt = workbook.add_format({
+        "font_size": 10,
+        "font_color": "#666666",
+    })
+
+    section_fmt = workbook.add_format({
+        "bold": True,
+        "font_color": white,
+        "bg_color": navy,
+        "align": "left",
+        "valign": "vcenter",
+        "border": 1,
+    })
+
+    header_fmt = workbook.add_format({
+        "bold": True,
+        "font_color": white,
+        "bg_color": dark,
+        "align": "center",
+        "valign": "vcenter",
+        "border": 1,
+    })
+
+    input_fmt = workbook.add_format({
+        "font_color": blue,
+        "bg_color": yellow,
+        "num_format": '$#,##0.0;[Red]($#,##0.0);-',
+        "border": 1,
+    })
+
+    input_pct_fmt = workbook.add_format({
+        "font_color": blue,
+        "bg_color": yellow,
+        "num_format": '0.0%',
+        "border": 1,
+    })
+
+    formula_fmt = workbook.add_format({
+        "font_color": "#000000",
+        "num_format": '$#,##0.0;[Red]($#,##0.0);-',
+        "border": 1,
+    })
+
+    linked_fmt = workbook.add_format({
+        "font_color": green,
+        "num_format": '$#,##0.0;[Red]($#,##0.0);-',
+        "border": 1,
+    })
+
+    pct_fmt = workbook.add_format({
+        "font_color": "#000000",
+        "num_format": '0.0%',
+        "border": 1,
+    })
+
+    multiple_fmt = workbook.add_format({
+        "font_color": "#000000",
+        "num_format": '0.0x',
+        "border": 1,
+    })
+
+    text_fmt = workbook.add_format({
+        "border": 1,
+    })
+
+    total_fmt = workbook.add_format({
+        "bold": True,
+        "top": 2,
+        "num_format": '$#,##0.0;[Red]($#,##0.0);-',
+        "border": 1,
+    })
+
+    base_case_fmt = workbook.add_format({
+        "bold": True,
+        "bg_color": "#D9EAD3",
+        "border": 2,
+        "num_format": '$#,##0.0;[Red]($#,##0.0);-',
+    })
+
+    assumption_label_fmt = workbook.add_format({
+        "bold": True,
+        "font_color": white,
+        "bg_color": dark,
+        "border": 1,
+        "align": "center",
+    })
+
+    # ---------------- Cover ----------------
+    cover = workbook.add_worksheet("Instructions")
+    cover.hide_gridlines(2)
+    cover.set_column("A:A", 4)
+    cover.set_column("B:F", 22)
+
+    cover.merge_range("B2:F2", f"{company_name} DCF Valuation Model", title_fmt)
+    cover.merge_range("B3:F3", "Generated by Veles DCF Analyst", subtitle_fmt)
+
+    cover.merge_range("B6:F6", "Workbook Contents", section_fmt)
+    contents = [
+        ["1", "Instructions"],
+        ["2", "Input Assumptions"],
+        ["3", "Revenue Build"],
+        ["4", "Operating Forecast"],
+        ["5", "FCFF"],
+        ["6", "WACC"],
+        ["7", "DCF Valuation"],
+        ["8", "DCF Forecast"],
+        ["9", "Sensitivity"],
+        ["10", "Comparable Companies"],
+        ["11", "Output Summary"],
+        ["12", "Dashboard"],
+    ]
+
+    cover.write_row("B8", ["#", "Sheet"], header_fmt)
+    for r, row in enumerate(contents, start=8):
+        cover.write(r, 1, row[0], text_fmt)
+        cover.write(r, 2, row[1], text_fmt)
+
+    cover.merge_range("B17:F17", "Color Convention", section_fmt)
+    conventions = [
+        ["Blue font", "Hardcoded inputs"],
+        ["Black font", "Formulas"],
+        ["Green font", "Linked cells from other sheets"],
+        ["Yellow fill", "Key assumptions"],
+        ["Red parentheses", "Negative numbers"],
+    ]
+    cover.write_row("B19", ["Convention", "Meaning"], header_fmt)
+    for r, row in enumerate(conventions, start=19):
+        cover.write(r, 1, row[0], text_fmt)
+        cover.write(r, 2, row[1], text_fmt)
+
+    # ---------------- Inputs ----------------
+    inputs = workbook.add_worksheet("Input Assumptions")
+    inputs.hide_gridlines(2)
+    inputs.set_column("A:A", 4)
+    inputs.set_column("B:B", 32)
+    inputs.set_column("C:C", 18)
+
+    inputs.merge_range("B2:C2", "Input Assumptions", section_fmt)
+    inputs.write_row("B4", ["Input", "Value"], header_fmt)
+
+    input_rows = [
+        ["Company Name", company_name],
+        ["Starting Revenue ($mm)", starting_revenue_live],
+        ["Base Case Revenue Growth", revenue_growth_live],
+        ["Base Case EBIT Margin", ebit_margin_live],
+        ["Base Case Tax Rate", tax_rate_live],
+        ["Cash ($mm)", cash_live],
+        ["Debt ($mm)", debt_live],
+        ["Diluted Shares (mm)", shares_live],
+    ]
+
+    for i, row in enumerate(input_rows, start=4):
+        inputs.write(i, 1, row[0], text_fmt)
+        if i in (6, 7, 8):
+            inputs.write(i, 2, row[1], input_pct_fmt)
+        else:
+            inputs.write(i, 2, row[1], input_fmt)
+
+    inputs.write_comment("C5", "Source: User input / app model output.")
+    inputs.write_comment("C6", "Source: User input assumption.")
+    inputs.write_comment("C7", "Source: User input assumption.")
+    inputs.write_comment("C8", "Source: User input assumption.")
+
+    # ---------------- Revenue Build ----------------
+    revenue_build = workbook.add_worksheet("Revenue Build")
+    revenue_build.hide_gridlines(2)
+    revenue_build.freeze_panes(5, 2)
+    revenue_build.set_column("A:A", 4)
+    revenue_build.set_column("B:B", 28)
+    revenue_build.set_column("C:Z", 14)
+
+    years = forecast_df["Year"].tolist()
+
+    revenue_build.merge_range(1, 1, 1, 2 + len(years), "Revenue Build", section_fmt)
+    revenue_build.write(3, 1, "Line Item", header_fmt)
+
+    for col, year in enumerate(years, start=2):
+        revenue_build.write(3, col, f"Year {int(year)}", header_fmt)
+
+    revenue_build.write(4, 1, "Starting Revenue ($mm)", text_fmt)
+    revenue_build.write(4, 2, float(forecast_df["Revenue ($M)"].iloc[0]), linked_fmt)
+
+    for col in range(3, 2 + len(years)):
+        revenue_build.write_blank(4, col, None, input_fmt)
+
+    revenue_build.write(5, 1, "Revenue Growth", text_fmt)
+
+    revenue_values = [float(x) for x in forecast_df["Revenue ($M)"].tolist()]
+
+    for col, revenue_value in enumerate(revenue_values, start=2):
+        if col == 2:
+            revenue_build.write_blank(5, col, None, pct_fmt)
+        else:
+            prev_value = revenue_values[col - 3]
+            growth_value = (
+                revenue_value / prev_value - 1
+                if prev_value
+                else 0.0
+            )
+            revenue_build.write(5, col, growth_value, pct_fmt)
+
+    revenue_build.write(6, 1, "Revenue ($mm)", text_fmt)
+
+    for col, revenue_value in enumerate(revenue_values, start=2):
+        revenue_build.write(6, col, revenue_value, linked_fmt)
+
+    revenue_build.write(8, 1, "Note", text_fmt)
+    revenue_build.write(
+        8,
+        2,
+        "Revenue is formula-driven and will later feed the operating forecast.",
+        text_fmt,
+    )
+
+    # ---------------- Operating Forecast ----------------
+    # This sheet is a transparent representation of the live base-case
+    # forecast generated by the DCF engine. It does NOT invent a second
+    # operating model using arbitrary COGS / R&D / S&M / G&A percentages.
+    op = workbook.add_worksheet("Operating Forecast")
+    op.hide_gridlines(2)
+    op.freeze_panes(5, 2)
+    op.set_column("A:A", 4)
+    op.set_column("B:B", 28)
+    op.set_column("C:Z", 14)
+
+    op.merge_range(1, 1, 1, 2 + len(years), "Operating Forecast", section_fmt)
+    op.write(3, 1, "Line Item", header_fmt)
+
+    for col, year in enumerate(years, start=2):
+        op.write(3, col, f"Year {int(year)}", header_fmt)
+
+    op_rows = [
+        ("Revenue ($mm)", "Revenue ($M)", "money"),
+        ("EBIT ($mm)", "EBIT ($M)", "money"),
+        ("EBIT Margin", None, "pct"),
+        ("Taxes on EBIT ($mm)", None, "money"),
+        ("NOPAT ($mm)", "NOPAT ($M)", "money"),
+    ]
+
+    for row_idx, (label, _, _) in enumerate(op_rows, start=4):
+        op.write(row_idx, 1, label, text_fmt)
+
+    revenues = [float(x) for x in forecast_df["Revenue ($M)"].tolist()]
+    ebits = [float(x) for x in forecast_df["EBIT ($M)"].tolist()]
+    nopats = [float(x) for x in forecast_df["NOPAT ($M)"].tolist()]
+
+    for j, col in enumerate(range(2, 2 + len(years))):
+        revenue_value = revenues[j]
+        ebit_value = ebits[j]
+        nopat_value = nopats[j]
+
+        op.write(4, col, revenue_value, linked_fmt)
+        op.write(5, col, ebit_value, linked_fmt)
+        op.write(
+            6, col,
+            ebit_value / revenue_value if revenue_value else 0.0,
+            pct_fmt,
+        )
+        op.write(7, col, ebit_value - nopat_value, formula_fmt)
+        op.write(8, col, nopat_value, linked_fmt)
+
+    # ---------------- FCFF ----------------
+    fcff = workbook.add_worksheet("FCFF")
+    fcff.hide_gridlines(2)
+    fcff.freeze_panes(5, 2)
+    fcff.set_column("A:A", 4)
+    fcff.set_column("B:B", 28)
+    fcff.set_column("C:Z", 14)
+
+    fcff.merge_range(1, 1, 1, 2 + len(years), "Free Cash Flow to Firm", section_fmt)
+    fcff.write(3, 1, "Line Item", header_fmt)
+
+    for col, year in enumerate(years, start=2):
+        fcff.write(3, col, f"Year {int(year)}", header_fmt)
+
+    fcff_rows = [
+        ("NOPAT", "NOPAT ($M)"),
+        ("D&A", "D&A ($M)"),
+        ("CapEx", "CapEx ($M)"),
+        ("Change in NWC", "ΔNWC ($M)"),
+        ("FCFF", "FCFF ($M)"),
+        ("PV of FCFF", "PV FCFF ($M)"),
+    ]
+
+    for row_idx, (label, source_col) in enumerate(fcff_rows, start=4):
+        fcff.write(row_idx, 1, label, text_fmt)
+        values = forecast_df[source_col].tolist()
+        for col_idx, value in enumerate(values, start=2):
+            fmt = total_fmt if label in ("FCFF", "PV of FCFF") else linked_fmt
+            fcff.write(row_idx, col_idx, float(value), fmt)
+
+    # ---------------- WACC ----------------
+    wacc = workbook.add_worksheet("WACC")
+    wacc.hide_gridlines(2)
+
+    wacc.set_column("A:A", 4)
+    wacc.set_column("B:B", 34)
+    wacc.set_column("C:C", 18)
+
+    wacc.merge_range("B2:C2", "Weighted Average Cost of Capital", section_fmt)
+
+    wacc.write_row("B4", ["Metric", "Value"], header_fmt)
+
+    wacc_items = [
+        ("Risk Free Rate", risk_free_live),
+        ("Beta", beta_live),
+        ("Equity Risk Premium", erp_live),
+        ("Pre-Tax Cost of Debt", pretax_debt_live),
+        ("Tax Rate", wacc_tax_live),
+    ]
+
+    for i, (label, value) in enumerate(wacc_items, start=4):
+        wacc.write(i, 1, label, text_fmt)
+
+        if label == "Beta":
+            wacc.write(i, 2, value, input_fmt)
+        else:
+            wacc.write(i, 2, value, input_pct_fmt)
+
+    wacc.write(11, 1, "Cost of Equity", text_fmt)
+    wacc.write_formula(
+        11,
+        2,
+        "=C5+(C6*C7)",
+        pct_fmt,
+    )
+
+    wacc.write(12, 1, "After-Tax Cost of Debt", text_fmt)
+    wacc.write_formula(
+        12,
+        2,
+        "=C8*(1-C9)",
+        pct_fmt,
+    )
+
+    wacc.write(14, 1, "Debt Value", text_fmt)
+    wacc.write(14, 2, debt_value_live, input_fmt)
+
+    wacc.write(15, 1, "Equity Value", text_fmt)
+    wacc.write(15, 2, equity_value_live, input_fmt)
+
+    wacc.write(17, 1, "Debt Weight", text_fmt)
+    wacc.write_formula(
+        17,
+        2,
+        "=C15/(C15+C16)",
+        pct_fmt,
+    )
+
+    wacc.write(18, 1, "Equity Weight", text_fmt)
+    wacc.write_formula(
+        18,
+        2,
+        "=C16/(C15+C16)",
+        pct_fmt,
+    )
+
+    wacc.write(20, 1, "WACC", section_fmt)
+    # The live model discount rate is authoritative. The component
+    # calculation above remains visible for auditability.
+    wacc.write(20, 2, discount_rate_live, input_pct_fmt)
+
+
+    # ---------------- DCF Valuation ----------------
+    dcf_val = workbook.add_worksheet("DCF Valuation")
+    dcf_val.hide_gridlines(2)
+
+    dcf_val.set_column("A:A", 4)
+    dcf_val.set_column("B:B", 36)
+    dcf_val.set_column("C:C", 18)
+
+    dcf_val.merge_range("B2:C2", "Discounted Cash Flow Valuation", section_fmt)
+
+    dcf_val.write_row("B4", ["Metric", "Value"], header_fmt)
+
+    dcf_val.write(4, 1, "PV of Explicit FCFF", text_fmt)
+    dcf_val.write(5, 1, "PV of Terminal Value", text_fmt)
+    dcf_val.write(6, 1, "Enterprise Value", text_fmt)
+
+    dcf_val.write(8, 1, "Cash", text_fmt)
+    dcf_val.write(9, 1, "Debt", text_fmt)
+
+    dcf_val.write(11, 1, "Equity Value", text_fmt)
+    dcf_val.write(12, 1, "Shares Outstanding", text_fmt)
+    dcf_val.write(13, 1, "Implied Share Price", text_fmt)
+
+    dcf_val.write(16, 1, "Terminal Value Method", section_fmt)
+
+    dcf_val.write(18, 1, "Perpetuity Growth Rate", text_fmt)
+    dcf_val.write(19, 1, "Exit EBITDA Multiple", text_fmt)
+
+    dcf_val.write(21, 1, "Terminal Value (Gordon Growth)", text_fmt)
+    dcf_val.write(22, 1, "Terminal Value (Exit Multiple)", text_fmt)
+
+    dcf_val.write(24, 1, "Current Share Price", text_fmt)
+    dcf_val.write(25, 1, "Upside / Downside", text_fmt)
+
+    # Initial values from summary output
+    try:
+        base_row = summary_df[summary_df["Scenario"] == "Base Case"].iloc[0]
+
+        ev = float(base_row["Enterprise Value ($M)"])
+        equity = float(base_row["Equity Value ($M)"])
+        share_price = float(base_row["Implied Share Price ($)"])
+
+    except Exception:
+        ev = 0
+        equity = 0
+        share_price = 0
+
+    last_year_col = xlsxwriter.utility.xl_col_to_name(1 + len(years))
+    fcff_start = "C9"
+    fcff_end = f"{last_year_col}9"
+
+    pv_explicit_live = float(forecast_df["PV FCFF ($M)"].sum())
+    pv_terminal_live = ev - pv_explicit_live
+
+    dcf_val.write(4, 2, pv_explicit_live, linked_fmt)
+
+    dcf_val.write(18, 2, terminal_growth_live, input_pct_fmt)
+    dcf_val.write(19, 2, 12.0, input_fmt)
+
+    dcf_val.write_formula(
+        21,
+        2,
+        f"=FCFF!{last_year_col}9*(1+C19)/(WACC!C21-C19)",
+        formula_fmt,
+    )
+
+    dcf_val.write(5, 2, pv_terminal_live, linked_fmt)
+
+    dcf_val.write(6, 2, ev, total_fmt)
+
+    dcf_val.write(8, 2, cash_live, linked_fmt)
+    dcf_val.write(9, 2, debt_live, linked_fmt)
+
+    dcf_val.write(11, 2, equity, total_fmt)
+
+    dcf_val.write(12, 2, shares_live, linked_fmt)
+
+    dcf_val.write(13, 2, share_price, total_fmt)
+
+    dcf_val.write_blank(22, 2, None, formula_fmt)
+
+    current_share_price_live = (
+        current_market_cap_live / shares_live
+        if shares_live
+        else 0.0
+    )
+    dcf_val.write(24, 2, current_share_price_live, linked_fmt)
+
+    dcf_val.write_formula(
+        25,
+        2,
+        "=(C14/C25)-1",
+        pct_fmt,
+    )
+
+    # ---------------- DCF Forecast ----------------
+    forecast = workbook.add_worksheet("DCF Forecast")
+    forecast.hide_gridlines(2)
+    forecast.freeze_panes(5, 2)
+    forecast.set_column("A:A", 4)
+    forecast.set_column("B:B", 26)
+    forecast.set_column("C:Z", 14)
+
+    years = forecast_df["Year"].tolist()
+    forecast.merge_range(1, 1, 1, 2 + len(years), "DCF Forecast", section_fmt)
+    forecast.write(3, 1, "Fiscal Year", header_fmt)
+
+    for col, year in enumerate(years, start=2):
+        forecast.write(3, col, f"Year {int(year)}", header_fmt)
+
+    line_items = [
+        ("Revenue ($mm)", "Revenue ($M)"),
+        ("EBIT ($mm)", "EBIT ($M)"),
+        ("NOPAT ($mm)", "NOPAT ($M)"),
+        ("D&A ($mm)", "D&A ($M)"),
+        ("CapEx ($mm)", "CapEx ($M)"),
+        ("Change in NWC ($mm)", "ΔNWC ($M)"),
+        ("Free Cash Flow to Firm ($mm)", "FCFF ($M)"),
+        ("PV of FCFF ($mm)", "PV FCFF ($M)"),
+    ]
+
+    for row_idx, (label, col_name) in enumerate(line_items, start=4):
+        forecast.write(row_idx, 1, label, text_fmt)
+        for col_idx, value in enumerate(forecast_df[col_name].tolist(), start=2):
+            forecast.write(row_idx, col_idx, float(value), formula_fmt)
+
+    forecast.write(13, 1, "Total PV of FCFF ($mm)", text_fmt)
+    forecast.write_formula(13, 2, f"=SUM(C12:{xlsxwriter.utility.xl_col_to_name(1+len(years))}12)", total_fmt)
+
+    # ---------------- Sensitivity ----------------
+    sens = workbook.add_worksheet("Sensitivity")
+    sens.hide_gridlines(2)
+    sens.set_column("A:A", 4)
+    sens.set_column("B:H", 16)
+
+    sens.merge_range("B2:G2", "Sensitivity Analysis — Implied Share Price", section_fmt)
+
+    sens_display = sensitivity_df.reset_index().rename(columns={"index": "Discount Rate"})
+
+    # Main sensitivity table starts directly beneath the title.
+    start_row = 3
+    start_col = 1
+
+    for c, col_name in enumerate(sens_display.columns, start=start_col):
+        sens.write(start_row, c, col_name, header_fmt)
+
+    for r in range(len(sens_display)):
+        for c in range(len(sens_display.columns)):
+            value = sens_display.iloc[r, c]
+
+            if c == 0:
+                sens.write(r + start_row + 1, c + start_col, value, pct_fmt)
+            else:
+                if r == len(sens_display) // 2 and c == len(sens_display.columns) // 2:
+                    sens.write(r + start_row + 1, c + start_col, float(value), base_case_fmt)
+                else:
+                    sens.write(r + start_row + 1, c + start_col, float(value), formula_fmt)
+
+    sens.conditional_format(
+        start_row + 1,
+        start_col + 1,
+        start_row + len(sens_display),
+        start_col + len(sens_display.columns) - 1,
+        {
+            "type": "3_color_scale",
+            "min_color": "#F8696B",
+            "mid_color": "#FFEB84",
+            "max_color": "#63BE7B",
+        },
+    )
+
+    # ---------------- Comparable Companies ----------------
+    comps = workbook.add_worksheet("Comparable Companies")
+    comps.hide_gridlines(2)
+    comps.freeze_panes(6, 2)
+
+    comps.set_column("A:A", 3)
+    comps.set_column("B:B", 30)   # Company
+    comps.set_column("C:C", 9)    # Ticker
+    comps.set_column("D:D", 25)   # Peer Type
+    comps.set_column("E:F", 14)   # Growth / Margin
+    comps.set_column("G:I", 13)   # Multiples
+
+    comps.merge_range(
+        "B2:I2",
+        "Comparable Company Analysis",
+        section_fmt,
+    )
+
+    comps.merge_range(
+        "B3:I3",
+        (
+            "Core Operating Peers determine the primary trading-comps "
+            "medians. Nuclear Reference Peers provide sector context. "
+            "The target company is shown separately and excluded from "
+            "peer median calculations."
+        ),
+        subtitle_fmt,
+    )
+
+    # Compact research-style trading comps table.
+    comp_columns = [
+        "Company",
+        "Ticker",
+        "Peer Type",
+        "Revenue Growth",
+        "EBITDA Margin",
+        "EV/Revenue",
+        "EV/EBITDA",
+        "P/E",
+    ]
+
+    comp_columns = [
+        col for col in comp_columns
+        if comps_df is not None and col in comps_df.columns
+    ]
+
+    table_row = 5
+
+    if comps_df is not None and not comps_df.empty:
+        for c, col_name in enumerate(comp_columns, start=1):
+            display_name = {
+                "Revenue Growth": "Revenue Growth",
+                "EBITDA Margin": "EBITDA Margin",
+            }.get(col_name, col_name)
+
+            comps.write(
+                table_row,
+                c,
+                display_name,
+                header_fmt,
+            )
+
+        for r in range(len(comps_df)):
+            row = comps_df.iloc[r]
+            peer_type = str(row.get("Peer Type", ""))
+
+            excel_row = table_row + 1 + r
+
+            for c, col_name in enumerate(comp_columns, start=1):
+                value = row.get(col_name)
+
+                if col_name in ["Company", "Ticker", "Peer Type"]:
+                    comps.write(
+                        excel_row,
+                        c,
+                        "" if value is None else str(value),
+                        text_fmt,
+                    )
+                    continue
+
+                try:
+                    numeric_value = float(value)
+                except (TypeError, ValueError):
+                    numeric_value = None
+
+                if (
+                    numeric_value is None
+                    or not math.isfinite(numeric_value)
+                ):
+                    comps.write_blank(
+                        excel_row,
+                        c,
+                        None,
+                        text_fmt,
+                    )
+                elif col_name in [
+                    "Revenue Growth",
+                    "EBITDA Margin",
+                ]:
+                    comps.write(
+                        excel_row,
+                        c,
+                        numeric_value,
+                        pct_fmt,
+                    )
+                else:
+                    comps.write(
+                        excel_row,
+                        c,
+                        numeric_value,
+                        multiple_fmt,
+                    )
+
+            # Visually distinguish target company.
+            if peer_type == "Target Company":
+                comps.set_row(
+                    excel_row,
+                    None,
+                    workbook.add_format({
+                        "bold": True,
+                        "bg_color": light_blue,
+                    }),
+                )
+
+        data_end_row = table_row + len(comps_df)
+
+        comps.autofilter(
+            table_row,
+            1,
+            data_end_row,
+            len(comp_columns),
+        )
+
+    # Primary peer median section.
+    median_start = table_row + (
+        len(comps_df) if comps_df is not None else 0
+    ) + 3
+
+    comps.merge_range(
+        median_start,
+        1,
+        median_start,
+        4,
+        "Core Peer Trading Multiples",
+        section_fmt,
+    )
+
+    median_metrics = [
+        ("Median EV / Revenue", "Median EV/Revenue"),
+        ("Median EV / EBITDA", "Median EV/EBITDA"),
+        ("Median P / E", "Median P/E"),
+    ]
+
+    comps.write_row(
+        median_start + 1,
+        1,
+        ["Metric", "Value"],
+        header_fmt,
+    )
+
+    summary_map = {}
+
+    if comps_summary_df is not None and not comps_summary_df.empty:
+        summary_map = dict(
+            zip(
+                comps_summary_df["Metric"],
+                comps_summary_df["Value"],
+            )
+        )
+
+    for i, (label, key) in enumerate(median_metrics):
+        row_idx = median_start + 2 + i
+        value = summary_map.get(key)
+
+        comps.write(row_idx, 1, label, text_fmt)
+
+        try:
+            numeric_value = float(value)
+        except (TypeError, ValueError):
+            numeric_value = None
+
+        if (
+            numeric_value is not None
+            and math.isfinite(numeric_value)
+        ):
+            comps.write(
+                row_idx,
+                2,
+                numeric_value,
+                multiple_fmt,
+            )
+        else:
+            comps.write_blank(
+                row_idx,
+                2,
+                None,
+                multiple_fmt,
+            )
+
+    # Implied share-price outputs.
+    implied_start = median_start
+
+    comps.merge_range(
+        implied_start,
+        5,
+        implied_start,
+        8,
+        "Implied Equity Value",
+        section_fmt,
+    )
+
+    comps.write_row(
+        implied_start + 1,
+        5,
+        ["Methodology", "Implied Share Price"],
+        header_fmt,
+    )
+
+    implied_metrics = [
+        (
+            "EV / Revenue",
+            "Implied Share Price from Revenue ($)",
+        ),
+        (
+            "EV / EBITDA",
+            "Implied Share Price from EBITDA ($)",
+        ),
+        (
+            "P / E",
+            "Implied Share Price from P/E ($)",
+        ),
+    ]
+
+    for i, (label, key) in enumerate(implied_metrics):
+        row_idx = implied_start + 2 + i
+        value = summary_map.get(key)
+
+        comps.write(row_idx, 5, label, text_fmt)
+
+        try:
+            numeric_value = float(value)
+        except (TypeError, ValueError):
+            numeric_value = None
+
+        if (
+            numeric_value is not None
+            and math.isfinite(numeric_value)
+        ):
+            comps.write(
+                row_idx,
+                6,
+                numeric_value,
+                formula_fmt,
+            )
+        else:
+            comps.write_blank(
+                row_idx,
+                6,
+                None,
+                formula_fmt,
+            )
+
+    # Cross-check.
+    if (
+        valuation_crosscheck_df is not None
+        and not valuation_crosscheck_df.empty
+    ):
+        cross_start = median_start + 7
+
+        comps.merge_range(
+            cross_start,
+            1,
+            cross_start,
+            4,
+            "Valuation Cross-Check",
+            section_fmt,
+        )
+
+        comps.write_row(
+            cross_start + 1,
+            1,
+            ["Methodology", "Implied Share Price ($)"],
+            header_fmt,
+        )
+
+        for r in range(len(valuation_crosscheck_df)):
+            method = valuation_crosscheck_df.iloc[r][
+                "Methodology"
+            ]
+            value = valuation_crosscheck_df.iloc[r][
+                "Implied Share Price ($)"
+            ]
+
+            comps.write(
+                cross_start + 2 + r,
+                1,
+                method,
+                text_fmt,
+            )
+
+            try:
+                numeric_value = float(value)
+            except (TypeError, ValueError):
+                numeric_value = None
+
+            if (
+                numeric_value is not None
+                and math.isfinite(numeric_value)
+            ):
+                comps.write(
+                    cross_start + 2 + r,
+                    2,
+                    numeric_value,
+                    formula_fmt,
+                )
+            else:
+                comps.write_blank(
+                    cross_start + 2 + r,
+                    2,
+                    None,
+                    formula_fmt,
+                )
+
+    # ---------------- Output Summary ----------------
+    output_sheet = workbook.add_worksheet("Output Summary")
+    output_sheet.hide_gridlines(2)
+    output_sheet.set_column("A:A", 4)
+    output_sheet.set_column("B:G", 20)
+
+    output_sheet.merge_range("B2:G2", "Output Summary", section_fmt)
+
+    for c, col_name in enumerate(summary_df.columns, start=1):
+        output_sheet.write(3, c, col_name, header_fmt)
+
+    for r in range(len(summary_df)):
+        for c in range(len(summary_df.columns)):
+            value = summary_df.iloc[r, c]
+            if isinstance(value, (int, float)):
+                if "%" in summary_df.columns[c]:
+                    output_sheet.write(r + 4, c + 1, float(value), pct_fmt)
+                else:
+                    output_sheet.write(r + 4, c + 1, float(value), formula_fmt)
+            else:
+                output_sheet.write(r + 4, c + 1, value, text_fmt)
+
+    chart = workbook.add_chart({"type": "column"})
+    chart.add_series({
+        "name": "Implied Share Price",
+        "categories": ["Output Summary", 4, 1, 6, 1],
+        "values": ["Output Summary", 4, 4, 6, 4],
+    })
+    chart.set_title({"name": "Implied Share Price by Scenario"})
+    chart.set_y_axis({"name": "Share Price ($)"})
+    chart.set_legend({"none": True})
+    output_sheet.insert_chart("B10", chart, {"x_scale": 1.4, "y_scale": 1.2})
+
+    # ---------------- Output Dashboard ----------------
+    dashboard = workbook.add_worksheet("Dashboard")
+    dashboard.hide_gridlines(2)
+
+    dashboard.set_column("A:A", 3)
+    dashboard.set_column("B:B", 22)
+    dashboard.set_column("C:C", 18)
+    dashboard.set_column("D:D", 3)
+    dashboard.set_column("E:E", 22)
+    dashboard.set_column("F:F", 18)
+    dashboard.set_column("G:G", 3)
+    dashboard.set_column("H:H", 22)
+    dashboard.set_column("I:I", 18)
+
+    dashboard.merge_range("B2:I2", f"{company_name} Valuation Dashboard", title_fmt)
+    dashboard.merge_range("B3:I3", "Client-facing summary of DCF valuation outputs", subtitle_fmt)
+
+    try:
+        base_row = summary_df[summary_df["Scenario"] == "Base Case"].iloc[0]
+        ev = float(base_row["Enterprise Value ($M)"])
+        equity = float(base_row["Equity Value ($M)"])
+        share_price = float(base_row["Implied Share Price ($)"])
+        mos_price = float(base_row["MoS Price ($)"])
+    except Exception:
+        ev = 0
+        equity = 0
+        share_price = 0
+        mos_price = 0
+
+    dashboard.merge_range("B5:C5", "Enterprise Value", section_fmt)
+    dashboard.write("B6", ev, total_fmt)
+
+    dashboard.merge_range("E5:F5", "Equity Value", section_fmt)
+    dashboard.write("E6", equity, total_fmt)
+
+    dashboard.merge_range("H5:I5", "Implied Share Price", section_fmt)
+    dashboard.write("H6", share_price, total_fmt)
+
+    dashboard.merge_range("B8:C8", "Margin of Safety Price", section_fmt)
+    dashboard.write("B9", mos_price, total_fmt)
+
+    dashboard.merge_range("E8:F8", "Base WACC", section_fmt)
+    dashboard.write_formula("E9", "=WACC!C21", pct_fmt)
+
+    dashboard.merge_range("H8:I8", "Terminal Growth", section_fmt)
+    dashboard.write_formula("H9", "='DCF Valuation'!C19", pct_fmt)
+
+    # Scenario comparison table
+    dashboard.merge_range("B12:I12", "Scenario Comparison", section_fmt)
+
+    for c, col_name in enumerate(summary_df.columns, start=1):
+        dashboard.write(13, c, col_name, header_fmt)
+
+    for r in range(len(summary_df)):
+        for c in range(len(summary_df.columns)):
+            value = summary_df.iloc[r, c]
+            if isinstance(value, (int, float)):
+                if "%" in summary_df.columns[c]:
+                    dashboard.write(r + 14, c + 1, float(value), pct_fmt)
+                else:
+                    dashboard.write(r + 14, c + 1, float(value), formula_fmt)
+            else:
+                dashboard.write(r + 14, c + 1, value, text_fmt)
+
+    # Revenue chart
+    revenue_chart = workbook.add_chart({"type": "line"})
+    revenue_chart.add_series({
+        "name": "Revenue",
+        "categories": ["DCF Forecast", 3, 2, 3, 1 + len(years)],
+        "values": ["DCF Forecast", 4, 2, 4, 1 + len(years)],
+    })
+    revenue_chart.set_title({"name": "Revenue Forecast"})
+    revenue_chart.set_y_axis({"name": "$mm"})
+    revenue_chart.set_legend({"none": True})
+    dashboard.insert_chart("B20", revenue_chart, {"x_scale": 1.35, "y_scale": 1.05})
+
+    # FCFF chart
+    fcff_chart = workbook.add_chart({"type": "line"})
+    fcff_chart.add_series({
+        "name": "FCFF",
+        "categories": ["DCF Forecast", 3, 2, 3, 1 + len(years)],
+        "values": ["DCF Forecast", 10, 2, 10, 1 + len(years)],
+    })
+    fcff_chart.set_title({"name": "Free Cash Flow Forecast"})
+    fcff_chart.set_y_axis({"name": "$mm"})
+    fcff_chart.set_legend({"none": True})
+    dashboard.insert_chart("E20", fcff_chart, {"x_scale": 1.35, "y_scale": 1.05})
+
+    # Share price by scenario
+    scenario_chart = workbook.add_chart({"type": "column"})
+    scenario_chart.add_series({
+        "name": "Implied Share Price",
+        "categories": ["Output Summary", 4, 1, 6, 1],
+        "values": ["Output Summary", 4, 4, 6, 4],
+    })
+    scenario_chart.set_title({"name": "Implied Share Price by Scenario"})
+    scenario_chart.set_y_axis({"name": "$ / share"})
+    scenario_chart.set_legend({"none": True})
+    dashboard.insert_chart("B37", scenario_chart, {"x_scale": 1.35, "y_scale": 1.05})
+
+    # EV to Equity bridge
+    bridge_start = 37
+    dashboard.write(bridge_start, 7, "Valuation Bridge", section_fmt)
+    dashboard.write(bridge_start + 1, 7, "Enterprise Value", text_fmt)
+    dashboard.write_formula(bridge_start + 1, 8, "=\'DCF Valuation\'!C7", formula_fmt)
+    dashboard.write(bridge_start + 2, 7, "+ Cash", text_fmt)
+    dashboard.write_formula(bridge_start + 2, 8, "=\'DCF Valuation\'!C9", linked_fmt)
+    dashboard.write(bridge_start + 3, 7, "- Debt", text_fmt)
+    dashboard.write_formula(bridge_start + 3, 8, "=\'DCF Valuation\'!C10", linked_fmt)
+    dashboard.write(bridge_start + 4, 7, "Equity Value", text_fmt)
+    dashboard.write_formula(bridge_start + 4, 8, "=\'DCF Valuation\'!C12", total_fmt)
+
+    workbook.close()
+    output.seek(0)
+
+    return output.getvalue()
+
+
+def create_biotech_rnpv_excel(
+    asset_name,
+    valuation_df,
+    forecast_df,
+    clinical_stage=None,
+    sensitivity_df=None,
+    monte_carlo_summary_df=None,
+    monte_carlo_percentile_df=None,
+    tornado_df=None,
+):
+    output = BytesIO()
+
+    workbook = xlsxwriter.Workbook(output, {"in_memory": True})
+
+    navy = "#12151A"
+    dark = "#2B303A"
+    blue = "#0000FF"
+    green = "#008000"
+    white = "#FFFFFF"
+    yellow = "#FFF2CC"
+    gray = "#F3F6F8"
+
+    title_fmt = workbook.add_format({
+        "bold": True,
+        "font_size": 20,
+        "font_color": navy,
+    })
+
+    subtitle_fmt = workbook.add_format({
+        "font_size": 10,
+        "font_color": "#666666",
+    })
+
+    section_fmt = workbook.add_format({
+        "bold": True,
+        "font_color": white,
+        "bg_color": navy,
+        "align": "left",
+        "valign": "vcenter",
+        "border": 1,
+    })
+
+    header_fmt = workbook.add_format({
+        "bold": True,
+        "font_color": white,
+        "bg_color": dark,
+        "align": "center",
+        "valign": "vcenter",
+        "border": 1,
+    })
+
+    input_fmt = workbook.add_format({
+        "font_color": blue,
+        "bg_color": yellow,
+        "num_format": '$#,##0.0;[Red]($#,##0.0);-',
+        "border": 1,
+    })
+
+    input_pct_fmt = workbook.add_format({
+        "font_color": blue,
+        "bg_color": yellow,
+        "num_format": '0.0%',
+        "border": 1,
+    })
+
+    formula_fmt = workbook.add_format({
+        "font_color": "#000000",
+        "num_format": '$#,##0.0;[Red]($#,##0.0);-',
+        "border": 1,
+    })
+
+    linked_fmt = workbook.add_format({
+        "font_color": green,
+        "num_format": '$#,##0.0;[Red]($#,##0.0);-',
+        "border": 1,
+    })
+
+    pct_fmt = workbook.add_format({
+        "font_color": "#000000",
+        "num_format": '0.0%',
+        "border": 1,
+    })
+
+    text_fmt = workbook.add_format({
+        "border": 1,
+    })
+
+    total_fmt = workbook.add_format({
+        "bold": True,
+        "top": 2,
+        "num_format": '$#,##0.0;[Red]($#,##0.0);-',
+        "border": 1,
+    })
+
+    # ---------------- Instructions ----------------
+    instructions = workbook.add_worksheet("Instructions")
+    instructions.hide_gridlines(2)
+    instructions.set_column("A:A", 4)
+    instructions.set_column("B:F", 24)
+
+    instructions.merge_range("B2:F2", f"{asset_name} Biotech rNPV Model", title_fmt)
+    instructions.merge_range("B3:F3", "Generated by Veles DCF Analyst", subtitle_fmt)
+
+    instructions.merge_range("B6:F6", "Workbook Contents", section_fmt)
+    contents = [
+        ["1", "Instructions"],
+        ["2", "Input Assumptions"],
+        ["3", "rNPV Forecast"],
+        ["4", "Sensitivity"],
+        ["5", "Monte Carlo"],
+        ["6", "Output Dashboard"],
+    ]
+
+    instructions.write_row("B8", ["#", "Sheet"], header_fmt)
+
+    for r, row in enumerate(contents, start=8):
+        instructions.write(r, 1, row[0], text_fmt)
+        instructions.write(r, 2, row[1], text_fmt)
+
+    instructions.merge_range("B17:F17", "Color Convention", section_fmt)
+    conventions = [
+        ["Blue font", "Hardcoded inputs"],
+        ["Black font", "Formulas"],
+        ["Green font", "Linked cells"],
+        ["Yellow fill", "Key assumptions"],
+        ["Red parentheses", "Negative numbers"],
+    ]
+
+    instructions.write_row("B19", ["Convention", "Meaning"], header_fmt)
+
+    for r, row in enumerate(conventions, start=19):
+        instructions.write(r, 1, row[0], text_fmt)
+        instructions.write(r, 2, row[1], text_fmt)
+
+    # ---------------- Input Assumptions ----------------
+    assumptions = workbook.add_worksheet("Input Assumptions")
+    assumptions.hide_gridlines(2)
+    assumptions.set_column("A:A", 4)
+    assumptions.set_column("B:B", 34)
+    assumptions.set_column("C:C", 18)
+
+    assumptions.merge_range("B2:C2", "Biotech rNPV Assumptions", section_fmt)
+    assumptions.write_row("B4", ["Assumption", "Value"], header_fmt)
+
+    assumption_rows = [
+        ["Asset / Company", asset_name],
+        ["Clinical / Regulatory Stage", clinical_stage or "Not specified"],
+        ["Launch Timing", "User input"],
+        ["Eligible Patients", "User input"],
+        ["Price per Treatment", "User input"],
+        ["Peak Market Penetration", "User input"],
+        ["Probability of Approval", "User input"],
+        ["Operating Margin", "User input"],
+        ["Discount Rate", "User input"],
+    ]
+
+    for r, row in enumerate(assumption_rows, start=4):
+        assumptions.write(r, 1, row[0], text_fmt)
+        assumptions.write(r, 2, row[1], input_fmt)
+
+    # ---------------- rNPV Forecast ----------------
+    forecast = workbook.add_worksheet("rNPV Forecast")
+    forecast.hide_gridlines(2)
+    forecast.freeze_panes(5, 2)
+    forecast.set_column("A:A", 4)
+    forecast.set_column("B:B", 32)
+    forecast.set_column("C:Z", 14)
+
+    years = forecast_df["Year"].tolist()
+
+    forecast.merge_range(1, 1, 1, 2 + len(years), "Probability-Adjusted rNPV Forecast", section_fmt)
+    forecast.write(3, 1, "Line Item", header_fmt)
+
+    for col, year in enumerate(years, start=2):
+        forecast.write(3, col, f"Year {int(year)}", header_fmt)
+
+    forecast_rows = [
+        ("Penetration", "Penetration"),
+        ("Revenue ($mm)", "Revenue ($M)"),
+        ("Operating Profit ($mm)", "Operating Profit ($M)"),
+        ("After-Tax Profit ($mm)", "After-Tax Profit ($M)"),
+        ("Probability-Adjusted CF ($mm)", "Probability-Adjusted CF ($M)"),
+        ("PV rNPV CF ($mm)", "PV rNPV CF ($M)"),
+    ]
+
+    for r, (label, col_name) in enumerate(forecast_rows, start=4):
+        forecast.write(r, 1, label, text_fmt)
+
+        for c, value in enumerate(forecast_df[col_name].tolist(), start=2):
+            if "Penetration" in label:
+                forecast.write(r, c, float(value), pct_fmt)
+            else:
+                forecast.write(r, c, float(value), formula_fmt)
+
+    # ---------------- Sensitivity ----------------
+    sens = workbook.add_worksheet("Sensitivity")
+    sens.hide_gridlines(2)
+    sens.set_column("A:A", 4)
+    sens.set_column("B:H", 16)
+
+    sens.merge_range("B2:G2", "rNPV Sensitivity Analysis", section_fmt)
+
+    if sensitivity_df is not None:
+        sens_display = sensitivity_df.reset_index().rename(columns={"index": "Discount Rate"})
+
+        for c, col_name in enumerate(sens_display.columns, start=1):
+            sens.write(3, c, col_name, header_fmt)
+
+        for r in range(len(sens_display)):
+            for c in range(len(sens_display.columns)):
+                value = sens_display.iloc[r, c]
+
+                if c == 0:
+                    sens.write(r + 4, c + 1, value, pct_fmt)
+                else:
+                    sens.write(r + 4, c + 1, float(value), formula_fmt)
+
+        sens.conditional_format(
+            4,
+            2,
+            4 + len(sens_display),
+            1 + len(sens_display.columns),
+            {
+                "type": "3_color_scale",
+                "min_color": "#F8696B",
+                "mid_color": "#FFEB84",
+                "max_color": "#63BE7B",
+            },
+        )
+
+    # ---------------- Monte Carlo ----------------
+    mc = workbook.add_worksheet("Monte Carlo")
+    mc.hide_gridlines(2)
+    mc.set_column("A:A", 4)
+    mc.set_column("B:E", 24)
+
+    mc.merge_range("B2:E2", "Monte Carlo rNPV Output", section_fmt)
+
+    if monte_carlo_summary_df is not None:
+        mc.write_row("B4", ["Metric", "Value"], header_fmt)
+
+        for r in range(len(monte_carlo_summary_df)):
+            mc.write(r + 4, 1, monte_carlo_summary_df.iloc[r, 0], text_fmt)
+            mc.write(r + 4, 2, monte_carlo_summary_df.iloc[r, 1], formula_fmt)
+
+    if monte_carlo_percentile_df is not None:
+        start_row = 20
+        mc.merge_range(start_row, 1, start_row, 3, "Monte Carlo Percentiles", section_fmt)
+        mc.write_row(start_row + 2, 1, list(monte_carlo_percentile_df.columns), header_fmt)
+
+        for r in range(len(monte_carlo_percentile_df)):
+            for c in range(len(monte_carlo_percentile_df.columns)):
+                value = monte_carlo_percentile_df.iloc[r, c]
+                if isinstance(value, (int, float)):
+                    mc.write(start_row + 3 + r, c + 1, float(value), formula_fmt)
+                else:
+                    mc.write(start_row + 3 + r, c + 1, value, text_fmt)
+
+    # ---------------- Tornado Analysis ----------------
+    tornado = workbook.add_worksheet("Tornado Analysis")
+    tornado.hide_gridlines(2)
+    tornado.set_column("A:A", 4)
+    tornado.set_column("B:F", 22)
+
+    tornado.merge_range("B2:F2", "Tornado Analysis — Key Valuation Drivers", section_fmt)
+
+    if tornado_df is not None:
+        for c, col_name in enumerate(tornado_df.columns, start=1):
+            tornado.write(3, c, col_name, header_fmt)
+
+        for r in range(len(tornado_df)):
+            for c in range(len(tornado_df.columns)):
+                value = tornado_df.iloc[r, c]
+                if isinstance(value, (int, float)):
+                    tornado.write(r + 4, c + 1, float(value), formula_fmt)
+                else:
+                    tornado.write(r + 4, c + 1, value, text_fmt)
+
+        tornado_chart = workbook.add_chart({"type": "bar"})
+        tornado_chart.add_series({
+            "name": "Impact Range",
+            "categories": ["Tornado Analysis", 4, 1, 4 + len(tornado_df) - 1, 1],
+            "values": ["Tornado Analysis", 4, 5, 4 + len(tornado_df) - 1, 5],
+        })
+        tornado_chart.set_title({"name": "Valuation Driver Impact"})
+        tornado_chart.set_x_axis({"name": "$mm"})
+        tornado_chart.set_legend({"none": True})
+        tornado.insert_chart("B12", tornado_chart, {"x_scale": 1.5, "y_scale": 1.2})
+
+    # ---------------- Dashboard ----------------
+    dashboard = workbook.add_worksheet("Dashboard")
+    dashboard.hide_gridlines(2)
+    dashboard.set_column("A:A", 4)
+    dashboard.set_column("B:H", 20)
+
+    dashboard.merge_range("B2:H2", f"{asset_name} Biotech Valuation Dashboard", title_fmt)
+    dashboard.merge_range("B3:H3", "Client-facing summary of rNPV and Monte Carlo valuation outputs", subtitle_fmt)
+
+    dashboard.merge_range("B5:C5", "Base rNPV Equity Value", section_fmt)
+    dashboard.merge_range("D5:E5", "Implied Share Price", section_fmt)
+    dashboard.merge_range("F5:G5", "Probability of Approval", section_fmt)
+
+    try:
+        equity_value = float(valuation_df[valuation_df["Metric"] == "Equity Value ($M)"]["Value"].iloc[0])
+        share_price = float(valuation_df[valuation_df["Metric"] == "Implied Share Price ($)"]["Value"].iloc[0])
+        approval_prob = float(valuation_df[valuation_df["Metric"] == "Probability of Approval"]["Value"].iloc[0])
+    except Exception:
+        equity_value = 0
+        share_price = 0
+        approval_prob = 0
+
+    dashboard.write("B6", equity_value, total_fmt)
+    dashboard.write("D6", share_price, total_fmt)
+    dashboard.write("F6", approval_prob, pct_fmt)
+
+    revenue_chart = workbook.add_chart({"type": "line"})
+    revenue_chart.add_series({
+        "name": "Revenue",
+        "categories": ["rNPV Forecast", 3, 2, 3, 1 + len(years)],
+        "values": ["rNPV Forecast", 5, 2, 5, 1 + len(years)],
+    })
+    revenue_chart.set_title({"name": "Revenue Forecast"})
+    revenue_chart.set_y_axis({"name": "$mm"})
+    revenue_chart.set_legend({"none": True})
+    dashboard.insert_chart("B10", revenue_chart, {"x_scale": 1.4, "y_scale": 1.1})
+
+    rnpv_chart = workbook.add_chart({"type": "line"})
+    rnpv_chart.add_series({
+        "name": "PV rNPV CF",
+        "categories": ["rNPV Forecast", 3, 2, 3, 1 + len(years)],
+        "values": ["rNPV Forecast", 9, 2, 9, 1 + len(years)],
+    })
+    rnpv_chart.set_title({"name": "Probability-Adjusted PV Cash Flow"})
+    rnpv_chart.set_y_axis({"name": "$mm"})
+    rnpv_chart.set_legend({"none": True})
+    dashboard.insert_chart("E10", rnpv_chart, {"x_scale": 1.4, "y_scale": 1.1})
+
+    workbook.close()
+    output.seek(0)
+
+    return output.getvalue()

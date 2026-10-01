@@ -1,0 +1,403 @@
+from __future__ import annotations
+
+from reportlab.lib.units import inch
+from reportlab.platypus import (
+    PageBreak,
+    Paragraph,
+    Spacer,
+    Table,
+    TableStyle,
+)
+
+from services.pdf.callouts import analyst_callout
+from services.pdf.sections import section_header_bar
+from services.pdf.tables import build_table
+from services.pdf.theme import PDFTheme, VELES_PDF_THEME
+
+
+def _summary_cards(
+    summary: dict,
+    styles: dict,
+    theme: PDFTheme,
+):
+    metrics = [
+        (
+            "Implied Value / Share",
+            summary.get(
+                "implied_value_per_share",
+                "N/A",
+            ),
+        ),
+        (
+            "Current Share Price",
+            summary.get(
+                "current_share_price",
+                "N/A",
+            ),
+        ),
+        (
+            "Implied Upside / Downside",
+            summary.get(
+                "implied_upside",
+                "N/A",
+            ),
+        ),
+        (
+            "WACC",
+            summary.get("wacc", "N/A"),
+        ),
+        (
+            "Enterprise Value",
+            summary.get(
+                "enterprise_value",
+                "N/A",
+            ),
+        ),
+        (
+            "Equity Value",
+            summary.get(
+                "equity_value",
+                "N/A",
+            ),
+        ),
+    ]
+
+    cards = []
+
+    for label, value in metrics:
+        content = [
+            Paragraph(
+                label,
+                styles["card_label"],
+            ),
+            Paragraph(
+                str(value),
+                styles["card_value"],
+            ),
+        ]
+
+        card = Table(
+            [[content]],
+            colWidths=[2.15 * inch],
+            rowHeights=[0.72 * inch],
+        )
+
+        card.setStyle(
+            TableStyle([
+                (
+                    "BACKGROUND",
+                    (0, 0),
+                    (-1, -1),
+                    theme.card_background,
+                ),
+                (
+                    "BOX",
+                    (0, 0),
+                    (-1, -1),
+                    0.5,
+                    theme.border,
+                ),
+                (
+                    "LEFTPADDING",
+                    (0, 0),
+                    (-1, -1),
+                    9,
+                ),
+                (
+                    "RIGHTPADDING",
+                    (0, 0),
+                    (-1, -1),
+                    9,
+                ),
+                (
+                    "TOPPADDING",
+                    (0, 0),
+                    (-1, -1),
+                    7,
+                ),
+                (
+                    "BOTTOMPADDING",
+                    (0, 0),
+                    (-1, -1),
+                    7,
+                ),
+            ])
+        )
+
+        cards.append(card)
+
+    return Table(
+        [
+            cards[:3],
+            cards[3:],
+        ],
+        colWidths=[2.35 * inch] * 3,
+        hAlign="LEFT",
+        style=TableStyle([
+            (
+                "VALIGN",
+                (0, 0),
+                (-1, -1),
+                "TOP",
+            ),
+            (
+                "LEFTPADDING",
+                (0, 0),
+                (-1, -1),
+                3,
+            ),
+            (
+                "RIGHTPADDING",
+                (0, 0),
+                (-1, -1),
+                3,
+            ),
+            (
+                "TOPPADDING",
+                (0, 0),
+                (-1, -1),
+                3,
+            ),
+            (
+                "BOTTOMPADDING",
+                (0, 0),
+                (-1, -1),
+                3,
+            ),
+        ]),
+    )
+
+
+def build_valuation_section(
+    report: dict,
+    styles: dict,
+    *,
+    theme: PDFTheme = VELES_PDF_THEME,
+) -> list:
+    valuation = report.get("valuation", {})
+
+    if valuation.get("status") != "available":
+        return []
+
+    elements: list = [PageBreak()]
+
+    elements.append(
+        section_header_bar(
+            "DCF Valuation",
+            styles,
+            subtitle=(
+                "Enterprise valuation based on analyst-edited "
+                "forecast and capital-market assumptions"
+            ),
+            anchor="dcf_valuation",
+            toc_level=0,
+            theme=theme,
+        )
+    )
+
+    model_status = valuation.get(
+        "model_status",
+        "illustrative",
+    )
+    model_note = valuation.get(
+        "model_note",
+        (
+            "Illustrative analytical scenario. "
+            "Not a final investment valuation."
+        ),
+    )
+    forecast_years = valuation.get(
+        "forecast_years",
+        "N/A",
+    )
+
+    elements.append(
+        Paragraph(
+            (
+                f"<b>Method:</b> "
+                f"{valuation.get('method', 'Enterprise DCF')}<br/>"
+                f"<b>Model:</b> "
+                f"{valuation.get('name', 'Saved valuation')}<br/>"
+                f"<b>Forecast horizon:</b> "
+                f"{forecast_years} years<br/>"
+                f"<b>Model status:</b> "
+                f"{str(model_status).title()}<br/>"
+                f"<b>Assumption source:</b> "
+                f"{valuation.get('assumption_source', 'Analyst assumptions')}"
+            ),
+            styles["body"],
+        )
+    )
+
+    elements.append(
+        analyst_callout(
+            "Illustrative Valuation Notice",
+            model_note,
+            styles,
+            callout_type="warning",
+            width=theme.content_width,
+            theme=theme,
+        )
+    )
+
+    elements.append(Spacer(1, 0.14 * inch))
+
+    elements.append(
+        _summary_cards(
+            valuation.get("summary", {}),
+            styles,
+            theme,
+        )
+    )
+
+    elements.append(Spacer(1, 0.18 * inch))
+
+    elements.append(
+        Paragraph(
+            "Scenario Analysis",
+            styles["h2"],
+        )
+    )
+
+    elements.append(
+        build_table(
+            valuation.get("scenario_table", []),
+            col_widths=[
+                1.2 * inch,
+                1.75 * inch,
+                1.75 * inch,
+                2.0 * inch,
+            ],
+            numeric_columns={1, 2, 3},
+            first_column_bold=True,
+            theme=theme,
+        )
+    )
+
+    elements.append(PageBreak())
+
+    elements.append(
+        section_header_bar(
+            "DCF Forecast",
+            styles,
+            subtitle=(
+                f"{valuation.get('forecast_years', 'Multi')}-year "
+                "operating forecast and discounted unlevered free cash flow"
+            ),
+            anchor="dcf_forecast",
+            toc_level=0,
+            theme=theme,
+        )
+    )
+
+    elements.append(
+        build_table(
+            valuation.get("forecast_table", []),
+            col_widths=[
+                0.55 * inch,
+                1.10 * inch,
+                0.75 * inch,
+                0.85 * inch,
+                1.05 * inch,
+                1.10 * inch,
+                1.10 * inch,
+            ],
+            numeric_columns={1, 2, 3, 4, 5, 6},
+            first_column_bold=True,
+            compact=True,
+            theme=theme,
+        )
+    )
+
+    sensitivity = valuation.get(
+        "sensitivity_table",
+        [],
+    )
+
+    if sensitivity:
+        elements.append(Spacer(1, 0.20 * inch))
+        elements.append(
+            Paragraph(
+                "WACC / Terminal Growth Sensitivity",
+                styles["h2"],
+            )
+        )
+
+        column_count = len(sensitivity[0])
+        first_width = 1.35 * inch
+        remaining_width = (
+            theme.content_width - first_width
+        ) / max(column_count - 1, 1)
+
+        elements.append(
+            build_table(
+                sensitivity,
+                col_widths=[
+                    first_width,
+                    *[
+                        remaining_width
+                        for _ in range(
+                            column_count - 1
+                        )
+                    ],
+                ],
+                numeric_columns=set(
+                    range(1, column_count)
+                ),
+                first_column_bold=True,
+                compact=True,
+                theme=theme,
+            )
+        )
+
+    elements.append(PageBreak())
+
+    elements.append(
+        section_header_bar(
+            "DCF Assumptions and Limitations",
+            styles,
+            subtitle=(
+                "Observed inputs, analyst assumptions, "
+                "and model-specific cautions"
+            ),
+            anchor="dcf_assumptions",
+            toc_level=0,
+            theme=theme,
+        )
+    )
+
+    elements.append(
+        build_table(
+            valuation.get("assumption_table", []),
+            col_widths=[
+                2.15 * inch,
+                1.55 * inch,
+                3.50 * inch,
+            ],
+            first_column_bold=True,
+            theme=theme,
+        )
+    )
+
+    warnings = valuation.get("warnings", [])
+
+    if warnings:
+        elements.append(Spacer(1, 0.16 * inch))
+
+        warning_text = "\n".join(
+            f"• {warning}"
+            for warning in warnings
+        )
+
+        elements.append(
+            analyst_callout(
+                "Valuation Warnings",
+                warning_text,
+                styles,
+                callout_type="warning",
+                width=theme.content_width,
+                theme=theme,
+            )
+        )
+
+    return elements

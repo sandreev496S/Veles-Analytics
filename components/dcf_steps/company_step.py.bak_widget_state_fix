@@ -1,0 +1,524 @@
+import streamlit as st
+import re
+import pandas as pd
+from components.ui.cards import glass_card
+from services.financial_statement_parser import parse_financial_statement
+from services.company_lookup import get_company_snapshot
+from services.historical_financials import get_historical_financials
+
+def _format_currency_millions(value):
+    if value is None:
+        return "—"
+
+    try:
+        value = float(value)
+    except Exception:
+        return str(value)
+
+    if value >= 1_000_000:
+        return f"${value / 1_000_000:.2f}T"
+
+    if value >= 1_000:
+        return f"${value / 1_000:.2f}B"
+
+    return f"${value:.2f}M"
+
+
+def _format_plain_number(value):
+    if value is None:
+        return "—"
+
+    try:
+        return f"{float(value):,.2f}"
+    except Exception:
+        return str(value)
+
+
+def _save_company_snapshot():
+    st.session_state["dcf_company_snapshot"] = {
+        "dcf_company_name": st.session_state.get("dcf_company_name", "Adobe"),
+        "dcf_forecast_years": st.session_state.get("dcf_forecast_years", 5),
+        "dcf_starting_revenue": st.session_state.get("dcf_starting_revenue", 23000.0),
+        "dcf_current_market_cap": st.session_state.get("dcf_current_market_cap", 170000.0),
+        "dcf_cash": st.session_state.get("dcf_cash", 7000.0),
+        "dcf_debt": st.session_state.get("dcf_debt", 6000.0),
+        "dcf_shares": st.session_state.get("dcf_shares", 420.0),
+    }
+
+
+def _restore_company_snapshot():
+    snapshot = st.session_state.get("dcf_company_snapshot", {})
+    for key, value in snapshot.items():
+        if key not in st.session_state:
+            st.session_state[key] = value
+
+
+def render_company_step(section_title):
+    _restore_company_snapshot()
+    st.session_state.setdefault("dcf_company_name", "Adobe")
+    st.session_state.setdefault("dcf_current_market_cap", 170000.0)
+    st.session_state.setdefault("dcf_cash", 7000.0)
+    st.session_state.setdefault("dcf_debt", 6000.0)
+    st.session_state.setdefault("dcf_shares", 420.0)
+    st.session_state.setdefault("dcf_starting_revenue", 23000.0)
+    st.session_state.setdefault("dcf_forecast_years", 5)
+
+    pending_ticker_inputs = st.session_state.pop("pending_ticker_company_inputs", None)
+    if pending_ticker_inputs:
+        for key, value in pending_ticker_inputs.items():
+            st.session_state[key] = value
+
+    section_title(
+        "Step 1 — Company Setup",
+        "Define the company profile, capital structure, and initial forecast base."
+    )
+
+    glass_card(
+        title="Valuation Starting Point",
+        eyebrow="Company Profile",
+        body="Set the core assumptions that anchor the DCF: company name, current market value, cash, debt, diluted share count, revenue base, and forecast horizon."
+    )
+
+    with st.expander("Ticker Lookup", expanded=False):
+        lookup_col1, lookup_col2 = st.columns([2, 1])
+
+        with lookup_col1:
+            ticker = st.text_input(
+                "Ticker",
+                placeholder="AAPL",
+                key="dcf_ticker_lookup",
+            )
+
+        with lookup_col2:
+            st.markdown("<br>", unsafe_allow_html=True)
+            load_ticker = st.button(
+                "Load Company",
+                key="load_company_from_ticker",
+                use_container_width=True,
+            )
+
+        if load_ticker:
+            try:
+                snapshot = get_company_snapshot(ticker)
+
+                # A newly loaded company must initialize its own
+                # valuation assumptions rather than inherit the
+                # previous ticker's WACC scenario state.
+                st.session_state["dcf_wacc_scenarios_initialized"] = False
+
+                pending_inputs = {}
+
+                if snapshot.get("company_name"):
+                    pending_inputs["dcf_company_name"] = snapshot["company_name"]
+
+                if snapshot.get("market_cap") is not None:
+                    pending_inputs["dcf_current_market_cap"] = float(snapshot["market_cap"])
+
+                if snapshot.get("cash") is not None:
+                    pending_inputs["dcf_cash"] = float(snapshot["cash"])
+
+                if snapshot.get("debt") is not None:
+                    pending_inputs["dcf_debt"] = float(snapshot["debt"])
+
+                if snapshot.get("shares") is not None:
+                    pending_inputs["dcf_shares"] = float(snapshot["shares"])
+
+                if snapshot.get("revenue") is not None:
+                    pending_inputs["dcf_starting_revenue"] = float(snapshot["revenue"])
+
+                # Apply ticker-derived WACC inputs directly.
+                # These remain editable later in the WACC calculator.
+                if snapshot.get("beta") is not None:
+                    st.session_state["wacc_beta"] = float(snapshot["beta"])
+
+                if snapshot.get("market_cap") is not None:
+                    st.session_state["wacc_market_value_equity"] = float(
+                        snapshot["market_cap"]
+                    )
+
+                if snapshot.get("debt") is not None:
+                    st.session_state["wacc_market_value_debt"] = float(
+                        snapshot["debt"]
+                    )
+
+                st.session_state["pending_ticker_company_inputs"] = pending_inputs
+                st.session_state["dcf_company_snapshot"] = pending_inputs
+                st.session_state["dcf_loaded_ticker_snapshot"] = snapshot
+                st.success(f"Loaded company data for {snapshot['ticker']}.")
+                st.rerun()
+
+            except Exception as e:
+                st.error(f"Could not load ticker data: {e}")
+
+        snapshot = st.session_state.get("dcf_loaded_ticker_snapshot")
+        if snapshot:
+            loaded_ticker = snapshot.get("ticker")
+            typed_ticker = st.session_state.get("dcf_ticker_lookup", "").strip().upper()
+
+            if typed_ticker and loaded_ticker and typed_ticker != loaded_ticker:
+                st.warning(f"Ticker input is {typed_ticker}, but loaded data is still for {loaded_ticker}. Click Load Company to refresh.")
+
+            st.markdown(f"**Loaded Company Snapshot — {loaded_ticker}**")
+
+            snapshot_rows = [
+                {"Metric": "Ticker", "Value": snapshot.get("ticker")},
+                {"Metric": "Company", "Value": snapshot.get("company_name")},
+                {"Metric": "Share Price", "Value": f"${snapshot.get('share_price'):,.2f}" if snapshot.get("share_price") is not None else "—"},
+                {"Metric": "Market Cap", "Value": _format_currency_millions(snapshot.get("market_cap"))},
+                {"Metric": "Revenue", "Value": _format_currency_millions(snapshot.get("revenue"))},
+                {"Metric": "Cash", "Value": _format_currency_millions(snapshot.get("cash"))},
+                {"Metric": "Debt", "Value": _format_currency_millions(snapshot.get("debt"))},
+                {"Metric": "Shares Outstanding", "Value": f"{float(snapshot.get('shares')) / 1000:,.2f}B" if snapshot.get("shares") is not None else "—"},
+                {"Metric": "Beta", "Value": _format_plain_number(snapshot.get("beta"))},
+                {"Metric": "Sector", "Value": snapshot.get("sector")},
+                {"Metric": "Industry", "Value": snapshot.get("industry")},
+            ]
+
+            snapshot_df = pd.DataFrame(snapshot_rows)
+            snapshot_df["Value"] = snapshot_df["Value"].astype(str)
+            st.dataframe(snapshot_df, use_container_width=True)
+
+            if st.button("Load Historical Financials", key="load_historical_financials", use_container_width=True):
+                try:
+                    historicals = get_historical_financials(snapshot["ticker"])
+
+                    st.session_state["dcf_historical_financials"] = historicals
+
+                    # Automatically stage evidence-based DCF seeds.
+                    # The user can still edit every assumption afterward.
+                    pending_forecast_inputs = {}
+
+                    revenue_cagr = historicals.get("revenue_cagr")
+                    avg_ebit_margin = historicals.get("avg_ebit_margin")
+                    avg_fcf_conversion = historicals.get("avg_fcf_conversion")
+                    avg_capex_pct = historicals.get("avg_capex_pct")
+
+                    if revenue_cagr is not None:
+                        pending_forecast_inputs["growth"] = float(revenue_cagr)
+
+                    if avg_ebit_margin is not None:
+                        pending_forecast_inputs["ebit_margin"] = float(avg_ebit_margin)
+
+                    if avg_fcf_conversion is not None:
+                        pending_forecast_inputs["fcf_conversion"] = float(
+                            avg_fcf_conversion
+                        )
+
+                    if avg_capex_pct is not None:
+                        pending_forecast_inputs["capex_pct"] = float(
+                            avg_capex_pct
+                        )
+
+                    # Apply historical assumptions directly to the
+                    # canonical forecast state. No extra Step-2 handoff.
+                    growth = pending_forecast_inputs.get("growth")
+                    ebit_margin = pending_forecast_inputs.get("ebit_margin")
+                    capex_pct = pending_forecast_inputs.get("capex_pct")
+
+                    if growth is not None:
+                        raw_growth = float(growth)
+
+                        if raw_growth > 0.50:
+                            base_growth = 0.30
+                        elif raw_growth > 0.30:
+                            base_growth = raw_growth * 0.70
+                        else:
+                            base_growth = raw_growth
+
+                        base_growth = max(
+                            min(base_growth, 0.30),
+                            -0.10,
+                        )
+
+                        st.session_state[
+                            "dcf_Worst Case_growth"
+                        ] = max(base_growth - 0.05, -0.10)
+
+                        st.session_state[
+                            "dcf_Base Case_growth"
+                        ] = base_growth
+
+                        st.session_state[
+                            "dcf_Best Case_growth"
+                        ] = min(base_growth + 0.05, 0.40)
+
+                    if ebit_margin is not None:
+                        base_margin = max(
+                            min(float(ebit_margin), 1.0),
+                            0.0,
+                        )
+
+                        st.session_state[
+                            "dcf_Worst Case_ebit_margin"
+                        ] = max(base_margin - 0.05, 0.0)
+
+                        st.session_state[
+                            "dcf_Base Case_ebit_margin"
+                        ] = base_margin
+
+                        st.session_state[
+                            "dcf_Best Case_ebit_margin"
+                        ] = min(base_margin + 0.05, 1.0)
+
+                    if capex_pct is not None:
+                        base_capex = max(
+                            min(float(capex_pct), 0.20),
+                            0.0,
+                        )
+
+                        st.session_state[
+                            "dcf_Worst Case_capex_pct"
+                        ] = min(base_capex + 0.01, 0.25)
+
+                        st.session_state[
+                            "dcf_Base Case_capex_pct"
+                        ] = base_capex
+
+                        st.session_state[
+                            "dcf_Best Case_capex_pct"
+                        ] = max(base_capex - 0.01, 0.0)
+
+                    st.success(
+                        f"Loaded historical financials for "
+                        f"{snapshot['ticker']}. Forecast assumptions "
+                        f"were initialized from historical performance."
+                    )
+                    st.rerun()
+
+                except Exception as e:
+                    st.error(f"Could not load historical financials: {e}")
+
+        historicals = st.session_state.get("dcf_historical_financials")
+        if historicals:
+            st.markdown("**Historical Financial Performance**")
+
+            historical_df = historicals["historical_df"].copy()
+            st.dataframe(historical_df, use_container_width=True)
+
+            hist_col1, hist_col2, hist_col3 = st.columns(3)
+
+            with hist_col1:
+                revenue_cagr = historicals.get("revenue_cagr")
+                st.metric(
+                    "Revenue CAGR",
+                    f"{revenue_cagr:.1%}" if revenue_cagr is not None else "—",
+                )
+
+            with hist_col2:
+                avg_ebit_margin = historicals.get("avg_ebit_margin")
+                st.metric(
+                    "Avg EBIT Margin",
+                    f"{avg_ebit_margin:.1%}" if avg_ebit_margin is not None else "—",
+                )
+
+            with hist_col3:
+                avg_fcf_conversion = historicals.get("avg_fcf_conversion")
+                st.metric(
+                    "Avg FCF Conversion",
+                    f"{avg_fcf_conversion:.1%}" if avg_fcf_conversion is not None else "—",
+                )
+
+            if st.button("Use Historical Trends for Forecast", key="use_historical_trends_forecast", use_container_width=True):
+                revenue_cagr = historicals.get("revenue_cagr")
+                avg_ebit_margin = historicals.get("avg_ebit_margin")
+                avg_fcf_conversion = historicals.get("avg_fcf_conversion")
+                avg_capex_pct = historicals.get("avg_capex_pct")
+
+                pending_forecast_inputs = {}
+
+                if revenue_cagr is not None:
+                    pending_forecast_inputs["growth"] = float(revenue_cagr)
+
+                if avg_ebit_margin is not None:
+                    pending_forecast_inputs["ebit_margin"] = float(avg_ebit_margin)
+
+                if avg_fcf_conversion is not None:
+                    pending_forecast_inputs["fcf_conversion"] = float(
+                        avg_fcf_conversion
+                    )
+
+                if avg_capex_pct is not None:
+                    pending_forecast_inputs["capex_pct"] = float(
+                        avg_capex_pct
+                    )
+
+                st.session_state[
+                    "pending_historical_forecast_inputs"
+                ] = pending_forecast_inputs
+                st.success("Historical trends staged for forecast assumptions.")
+                st.rerun()
+
+
+    with st.expander("Upload Financial Statement", expanded=False):
+        uploaded_statement = st.file_uploader(
+            "Upload CSV or Excel financial statement",
+            type=["csv", "xlsx", "xls"],
+            key="dcf_financial_statement_upload",
+        )
+
+        if uploaded_statement is not None:
+            if uploaded_statement.name.lower().endswith(".xls"):
+                st.warning("Legacy .xls file detected. Veles can attempt to parse it, but .xlsx or CSV is recommended for cleaner extraction.")
+
+            try:
+                parsed_financials, raw_financials_df = parse_financial_statement(uploaded_statement)
+
+                if parsed_financials:
+                    st.success("Financial statement parsed. Review detected values before applying.")
+
+                    detected_rows = [
+                        {
+                            "Field": "Company Name",
+                            "Session Key": "dcf_company_name",
+                            "Detected Value": parsed_financials.get("company_name"),
+                        },
+                        {
+                            "Field": "Starting Revenue",
+                            "Session Key": "dcf_starting_revenue",
+                            "Detected Value": parsed_financials.get("starting_revenue"),
+                        },
+                        {
+                            "Field": "Cash & Equivalents",
+                            "Session Key": "dcf_cash",
+                            "Detected Value": parsed_financials.get("cash"),
+                        },
+                        {
+                            "Field": "Total Debt",
+                            "Session Key": "dcf_debt",
+                            "Detected Value": parsed_financials.get("debt"),
+                        },
+                        {
+                            "Field": "Diluted Shares",
+                            "Session Key": "dcf_shares",
+                            "Detected Value": parsed_financials.get("shares"),
+                        },
+                    ]
+
+                    detected_df = pd.DataFrame(detected_rows).dropna(subset=["Detected Value"])
+
+                    display_cols = [
+                        col for col in ["Field", "Detected Value", "Confidence", "Source Sheet"]
+                        if col in detected_df.columns
+                    ]
+
+                    st.markdown("**Detected Financials**")
+                    display_df = detected_df[display_cols].copy()
+                    display_df["Detected Value"] = display_df["Detected Value"].astype(str)
+                    st.dataframe(display_df, use_container_width=True)
+
+                    if "Source Label" in detected_df.columns:
+                        with st.popover("Review source labels"):
+                            st.dataframe(detected_df, use_container_width=True)
+
+                    if st.button("Apply Parsed Values to DCF Inputs", key="apply_parsed_financials", use_container_width=True):
+                        for row in detected_rows:
+                            value = row["Detected Value"]
+
+                            if value is None:
+                                continue
+
+                            if isinstance(value, str):
+                                st.session_state[row["Session Key"]] = value
+                            else:
+                                st.session_state[row["Session Key"]] = float(value)
+
+                        st.success("Parsed financial values applied to DCF inputs.")
+                        st.rerun()
+
+                    st.caption("Detected source rows")
+                    st.dataframe(raw_financials_df, use_container_width=True)
+
+                    sheet_scores_df = raw_financials_df.attrs.get("sheet_scores")
+                    if sheet_scores_df is not None and not sheet_scores_df.empty:
+                        st.caption("Sheet selection debug")
+                        st.dataframe(sheet_scores_df, use_container_width=True)
+                else:
+                    st.warning("Could not detect revenue, cash, debt, or shares from this file.")
+
+            except Exception as e:
+                st.error(f"Could not parse financial statement: {e}")
+
+    st.session_state.setdefault("dcf_company_name", "Adobe")
+    st.session_state.setdefault("dcf_forecast_years", 5)
+    st.session_state.setdefault("dcf_starting_revenue", 23000.0)
+    st.session_state.setdefault("dcf_current_market_cap", 170000.0)
+    st.session_state.setdefault("dcf_cash", 7000.0)
+    st.session_state.setdefault("dcf_debt", 6000.0)
+    st.session_state.setdefault("dcf_shares", 420.0)
+
+    profile_col, capital_col = st.columns([1, 1])
+
+    with profile_col:
+        section_title(
+            "Company Profile",
+            "Identity and forecast horizon."
+        )
+
+        company_name = st.text_input(
+            "Company name",
+            key="dcf_company_name",
+        )
+
+        forecast_years = st.slider(
+            "Forecast years",
+            3,
+            10,
+            key="dcf_forecast_years",
+        )
+
+        starting_revenue = st.number_input(
+            "Starting revenue ($M)",
+            key="dcf_starting_revenue",
+        )
+
+    with capital_col:
+        section_title(
+            "Capital Structure",
+            "Market value, liquidity, leverage, and share count."
+        )
+
+        current_market_cap = st.number_input(
+            "Current market cap ($M)",
+            key="dcf_current_market_cap",
+        )
+
+        cash = st.number_input(
+            "Cash & equivalents ($M)",
+            key="dcf_cash",
+        )
+
+        debt = st.number_input(
+            "Total debt ($M)",
+            key="dcf_debt",
+        )
+
+        shares = st.number_input(
+            "Diluted shares outstanding (M)",
+            key="dcf_shares",
+        )
+
+    _save_company_snapshot()
+
+    return {
+        "company_name": company_name,
+        "current_market_cap": current_market_cap,
+        "cash": cash,
+        "debt": debt,
+        "shares": shares,
+        "starting_revenue": starting_revenue,
+        "forecast_years": forecast_years,
+    }
+
+
+def get_company_inputs_from_state():
+    snapshot = st.session_state.get("dcf_company_snapshot", {})
+
+    return {
+        "company_name": snapshot.get("dcf_company_name", st.session_state.get("dcf_company_name", "Adobe")),
+        "current_market_cap": snapshot.get("dcf_current_market_cap", st.session_state.get("dcf_current_market_cap", 170000.0)),
+        "cash": snapshot.get("dcf_cash", st.session_state.get("dcf_cash", 7000.0)),
+        "debt": snapshot.get("dcf_debt", st.session_state.get("dcf_debt", 6000.0)),
+        "shares": snapshot.get("dcf_shares", st.session_state.get("dcf_shares", 420.0)),
+        "starting_revenue": snapshot.get("dcf_starting_revenue", st.session_state.get("dcf_starting_revenue", 23000.0)),
+        "forecast_years": snapshot.get("dcf_forecast_years", st.session_state.get("dcf_forecast_years", 5)),
+    }

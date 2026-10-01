@@ -1,0 +1,232 @@
+from __future__ import annotations
+
+import math
+from typing import Any
+
+
+_MISSING_VALUES = {
+    "",
+    "N/A",
+    "NA",
+    "None",
+    "Unknown",
+    "-",
+    "—",
+}
+
+
+def parse_money(
+    value: Any,
+) -> float | None:
+    """
+    Parse a numeric or formatted financial value into raw units.
+
+    Supported examples
+    ------------------
+    1250000000
+    "$1.25B"
+    "$604.79M"
+    "($245.35M)"
+    "-$245.35M"
+    "$-245.35M"
+    """
+
+    if value is None:
+        return None
+
+    if isinstance(value, bool):
+        return None
+
+    if isinstance(value, (int, float)):
+        number = float(value)
+
+        if not math.isfinite(number):
+            return None
+
+        return number
+
+    text = str(value).strip()
+
+    if text in _MISSING_VALUES:
+        return None
+
+    negative = False
+
+    if text.startswith("(") and text.endswith(")"):
+        negative = True
+        text = text[1:-1].strip()
+
+    text = (
+        text
+        .replace("$", "")
+        .replace(",", "")
+        .replace(" ", "")
+    )
+
+    if text.startswith("-"):
+        negative = True
+        text = text[1:]
+
+    if text in _MISSING_VALUES:
+        return None
+
+    multiplier = 1.0
+    suffix = text[-1:].upper()
+
+    if suffix == "B":
+        multiplier = 1_000_000_000
+        text = text[:-1]
+    elif suffix == "M":
+        multiplier = 1_000_000
+        text = text[:-1]
+    elif suffix == "K":
+        multiplier = 1_000
+        text = text[:-1]
+
+    try:
+        result = float(text) * multiplier
+    except (TypeError, ValueError):
+        return None
+
+    if not math.isfinite(result):
+        return None
+
+    return -abs(result) if negative else result
+
+
+def _format_accounting_negative(
+    formatted: str,
+    *,
+    negative: bool,
+    accounting: bool,
+) -> str:
+    if not negative:
+        return formatted
+
+    if accounting:
+        return f"({formatted})"
+
+    return f"-{formatted}"
+
+
+def format_report_money(
+    value: float | int | None,
+    *,
+    accounting: bool = True,
+) -> str:
+    """
+    Format money for institutional report narratives and dashboards.
+
+    Examples
+    --------
+    1_420_000_000   -> "$1.4B"
+    604_790_000     -> "$605M"
+    -245_350_000    -> "($245M)"
+    """
+
+    if value is None:
+        return "N/A"
+
+    try:
+        number = float(value)
+    except (TypeError, ValueError):
+        return "N/A"
+
+    if not math.isfinite(number):
+        return "N/A"
+
+    negative = number < 0
+    absolute = abs(number)
+
+    if absolute >= 1_000_000_000:
+        formatted = (
+            f"${absolute / 1_000_000_000:,.1f}B"
+        )
+    elif absolute >= 1_000_000:
+        formatted = (
+            f"${absolute / 1_000_000:,.0f}M"
+        )
+    elif absolute >= 1_000:
+        formatted = (
+            f"${absolute / 1_000:,.0f}K"
+        )
+    else:
+        formatted = f"${absolute:,.0f}"
+
+    return _format_accounting_negative(
+        formatted,
+        negative=negative,
+        accounting=accounting,
+    )
+
+
+def format_precise_money(
+    value: float | int | None,
+    *,
+    accounting: bool = True,
+) -> str:
+    """
+    Format valuation-scale money with two decimal places.
+
+    Examples
+    --------
+    1_420_000_000   -> "$1.42B"
+    15_270_000      -> "$15.27M"
+    -245_350_000    -> "($245.35M)"
+    14.376          -> "$14.38"
+    """
+
+    if value is None:
+        return "N/A"
+
+    try:
+        number = float(value)
+    except (TypeError, ValueError):
+        return "N/A"
+
+    if not math.isfinite(number):
+        return "N/A"
+
+    negative = number < 0
+    absolute = abs(number)
+
+    if absolute >= 1_000_000_000:
+        formatted = (
+            f"${absolute / 1_000_000_000:,.2f}B"
+        )
+    elif absolute >= 1_000_000:
+        formatted = (
+            f"${absolute / 1_000_000:,.2f}M"
+        )
+    else:
+        formatted = f"${absolute:,.2f}"
+
+    return _format_accounting_negative(
+        formatted,
+        negative=negative,
+        accounting=accounting,
+    )
+
+
+def format_share_price(
+    value: float | int | None,
+) -> str:
+    """
+    Format per-share values without magnitude abbreviations.
+    """
+
+    if value is None:
+        return "N/A"
+
+    try:
+        number = float(value)
+    except (TypeError, ValueError):
+        return "N/A"
+
+    if not math.isfinite(number):
+        return "N/A"
+
+    if number < 0:
+        return f"(${abs(number):,.2f})"
+
+    return f"${number:,.2f}"

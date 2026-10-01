@@ -1,0 +1,42 @@
+{
+  "metrics": {
+    "cash": {
+      "accession_number": null,
+      "as_of": null,
+      "confidence": "high",
+      "display_value": "$500.0M",
+      "filing_form": null,
+      "is_safe_for_report": true,
+      "key": "cash",
+      "label": "Cash",
+      "period_end": "2025-12-31",
+      "source_name": "SEC EDGAR",
+      "source_type": "sec",
+      "suppression_reason": null,
+      "unit": "USD",
+      "validation_status": "verified",
+      "value": 500000000.0,
+      "warnings": []
+    },
+    "financial_debt": {
+      "accession_number": null,
+      "as_of": null,
+      "confidence": "high",
+      "display_value": "$100.0M",
+      "filing_form": null,
+      "is_safe_for_report": true,
+      "key": "financial_debt",
+      "label": "Financial Debt",
+      "period_end": "2025-12-31",
+      "source_name": "SEC EDGAR",
+      "source_type": "sec",
+      "suppression_reason": null,
+      "unit": "USD",
+      "validation_status": "verified",
+      "value": 100000000.0,
+      "warnings": []
+    }
+  },
+  "period_issues": [],
+  "suppressed_metrics": []
+}

@@ -1,0 +1,282 @@
+import math
+
+import pandas as pd
+import yfinance as yf
+
+
+# ---------------------------------------------------------------------
+# PEER SELECTION
+# ---------------------------------------------------------------------
+
+INDUSTRY_PEER_MAP = {
+    "Aerospace & Defense": [
+        ("HII", "Direct / Defense", "Naval shipbuilding and U.S. government defense exposure."),
+        ("CW", "Direct / Components", "Mission-critical engineered aerospace and defense components."),
+        ("NOC", "Reference / Defense", "Large-scale U.S. defense prime with long-cycle government programs."),
+        ("GD", "Reference / Defense", "Defense prime with major naval exposure."),
+        ("LDOS", "Reference / Government", "Government and national-security program exposure."),
+        ("LHX", "Reference / Defense", "Defense technology and mission-critical government systems."),
+        ("TXT", "Reference / Aerospace", "Aerospace and defense manufacturing exposure."),
+    ],
+}
+
+
+SPECIAL_COMPANY_PEERS = {
+    "BWXT": [
+        ("HII", "Direct / Naval", "Public reference for the U.S. naval nuclear ecosystem."),
+        ("CW", "Direct / Components", "Mission-critical engineered components and defense exposure."),
+        ("NOC", "Reference / Defense", "Long-duration U.S. government defense programs."),
+        ("GD", "Reference / Naval", "Major U.S. naval shipbuilding and defense exposure."),
+        ("LDOS", "Reference / Government", "Government and national-security program exposure."),
+        ("CCJ", "Reference / Nuclear", "Public-market reference for nuclear-industry exposure."),
+        ("FLR", "Reference / Nuclear Engineering", "Engineering and nuclear-project exposure."),
+    ],
+}
+
+
+def select_peer_candidates(ticker, industry=None):
+    ticker = str(ticker or "").upper().strip()
+    industry = str(industry or "").strip()
+
+    raw = SPECIAL_COMPANY_PEERS.get(
+        ticker,
+        INDUSTRY_PEER_MAP.get(industry, []),
+    )
+
+    return [
+        {
+            "ticker": peer_ticker,
+            "peer_type": peer_type,
+            "rationale": rationale,
+        }
+        for peer_ticker, peer_type, rationale in raw
+        if peer_ticker != ticker
+    ]
+
+
+# ---------------------------------------------------------------------
+# MARKET DATA RETRIEVAL
+# ---------------------------------------------------------------------
+
+def _safe_float(value):
+    try:
+        if value is None:
+            return None
+
+        value = float(value)
+
+        if not math.isfinite(value):
+            return None
+
+        return value
+    except (TypeError, ValueError):
+        return None
+
+
+def _to_millions(value):
+    value = _safe_float(value)
+    return value / 1_000_000 if value is not None else None
+
+
+def _clean_multiple(value, maximum):
+    value = _safe_float(value)
+
+    if value is None or value <= 0 or value > maximum:
+        return None
+
+    return value
+
+
+def fetch_peer_market_data(candidate):
+    ticker = candidate["ticker"]
+
+    try:
+        info = yf.Ticker(ticker).get_info() or {}
+    except Exception:
+        return None
+
+    market_cap = _to_millions(info.get("marketCap"))
+    enterprise_value = _to_millions(info.get("enterpriseValue"))
+    revenue = _to_millions(info.get("totalRevenue"))
+    ebitda = _to_millions(info.get("ebitda"))
+    net_income = _to_millions(info.get("netIncomeToCommon"))
+
+    ev_revenue = (
+        enterprise_value / revenue
+        if enterprise_value is not None and revenue is not None and revenue > 0
+        else None
+    )
+
+    ev_ebitda = (
+        enterprise_value / ebitda
+        if enterprise_value is not None and ebitda is not None and ebitda > 0
+        else None
+    )
+
+    pe = _clean_multiple(info.get("trailingPE"), 150.0)
+
+    if (
+        pe is None
+        and market_cap is not None
+        and net_income is not None
+        and net_income > 0
+    ):
+        pe = market_cap / net_income
+
+    ev_revenue = _clean_multiple(ev_revenue, 50.0)
+    ev_ebitda = _clean_multiple(ev_ebitda, 100.0)
+
+    if ev_revenue is None and ev_ebitda is None and pe is None:
+        return None
+
+    return {
+        "Company": info.get("longName") or info.get("shortName") or ticker,
+        "Ticker": ticker,
+        "Peer Type": candidate.get("peer_type", "Reference"),
+        "Rationale": candidate.get("rationale", ""),
+        "Market Cap ($M)": market_cap,
+        "Enterprise Value ($M)": enterprise_value,
+        "Revenue ($M)": revenue,
+        "EBITDA ($M)": ebitda,
+        "Revenue Growth": _safe_float(info.get("revenueGrowth")),
+        "EBITDA Margin": _safe_float(info.get("ebitdaMargins")),
+        "EV/Revenue": ev_revenue,
+        "EV/EBITDA": ev_ebitda,
+        "P/E": pe,
+    }
+
+
+def build_comparable_set(ticker, industry=None):
+    candidates = select_peer_candidates(ticker, industry)
+
+    rows = []
+
+    for candidate in candidates:
+        row = fetch_peer_market_data(candidate)
+
+        if row is not None:
+            rows.append(row)
+
+    return pd.DataFrame(rows)
+
+
+# ---------------------------------------------------------------------
+# VALUATION
+# ---------------------------------------------------------------------
+
+def _median(df, column):
+    if column not in df.columns:
+        return None
+
+    values = pd.to_numeric(df[column], errors="coerce").dropna()
+
+    if values.empty:
+        return None
+
+    return float(values.median())
+
+
+def build_comparable_valuation(
+    comps_df,
+    target_revenue,
+    target_ebitda,
+    target_net_income,
+    target_cash,
+    target_debt,
+    target_shares,
+):
+    if comps_df is None or comps_df.empty:
+        return {}, pd.DataFrame(columns=["Metric", "Value"])
+
+    # --------------------------------------------------------------
+    # CORE OPERATING PEERS
+    #
+    # Nuclear references such as uranium producers or engineering
+    # contractors remain visible in the table, but do not determine
+    # the primary trading-comps valuation.
+    # --------------------------------------------------------------
+    if "Peer Type" in comps_df.columns:
+        nuclear_mask = comps_df["Peer Type"].astype(str).str.contains(
+            "Nuclear",
+            case=False,
+            na=False,
+        )
+        core_df = comps_df.loc[~nuclear_mask].copy()
+    else:
+        core_df = comps_df.copy()
+
+    # Safety fallback: if filtering leaves too few usable observations,
+    # use the complete peer set rather than silently producing no result.
+    if len(core_df) < 3:
+        core_df = comps_df.copy()
+
+    median_ev_revenue = _median(core_df, "EV/Revenue")
+    median_ev_ebitda = _median(core_df, "EV/EBITDA")
+    median_pe = _median(core_df, "P/E")
+
+    all_median_ev_revenue = _median(comps_df, "EV/Revenue")
+    all_median_ev_ebitda = _median(comps_df, "EV/EBITDA")
+    all_median_pe = _median(comps_df, "P/E")
+
+    summary = {
+        "Core Peer Count": float(len(core_df)),
+        "Reference Peer Count": float(len(comps_df) - len(core_df)),
+
+        # Keep legacy names so the existing UI/export contract continues
+        # to work. These now represent the valuation-relevant core set.
+        "Median EV/Revenue": median_ev_revenue,
+        "Median EV/EBITDA": median_ev_ebitda,
+        "Median P/E": median_pe,
+
+        # Full-set statistics remain available for transparency.
+        "All-Peer Median EV/Revenue": all_median_ev_revenue,
+        "All-Peer Median EV/EBITDA": all_median_ev_ebitda,
+        "All-Peer Median P/E": all_median_pe,
+    }
+
+    cash = float(target_cash or 0.0)
+    debt = float(target_debt or 0.0)
+    shares = float(target_shares or 0.0)
+    net_debt = debt - cash
+
+    if median_ev_revenue is not None and target_revenue is not None:
+        implied_ev = float(target_revenue) * median_ev_revenue
+        implied_equity = implied_ev - net_debt
+
+        summary["Implied EV from Revenue ($M)"] = implied_ev
+        summary["Implied Equity from Revenue ($M)"] = implied_equity
+
+        if shares > 0:
+            summary["Implied Share Price from Revenue ($)"] = (
+                implied_equity / shares
+            )
+
+    if median_ev_ebitda is not None and target_ebitda is not None:
+        implied_ev = float(target_ebitda) * median_ev_ebitda
+        implied_equity = implied_ev - net_debt
+
+        summary["Implied EV from EBITDA ($M)"] = implied_ev
+        summary["Implied Equity from EBITDA ($M)"] = implied_equity
+
+        if shares > 0:
+            summary["Implied Share Price from EBITDA ($)"] = (
+                implied_equity / shares
+            )
+
+    if median_pe is not None and target_net_income is not None:
+        implied_equity = float(target_net_income) * median_pe
+
+        summary["Implied Equity from P/E ($M)"] = implied_equity
+
+        if shares > 0:
+            summary["Implied Share Price from P/E ($)"] = (
+                implied_equity / shares
+            )
+
+    summary_df = pd.DataFrame(
+        list(summary.items()),
+        columns=["Metric", "Value"],
+    )
+
+    return summary, summary_df
+

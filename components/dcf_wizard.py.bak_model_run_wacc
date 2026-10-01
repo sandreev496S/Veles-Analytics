@@ -1,0 +1,256 @@
+import streamlit as st
+import pandas as pd
+import plotly.express as px
+import plotly.graph_objects as go
+
+from services.validation import ValidationError, validate_standard_dcf_inputs
+from services.standard_dcf import (
+    run_dcf_case,
+    sensitivity_matrix,
+    reverse_dcf_growth,
+    comparable_valuation,
+)
+from services.pdf_report import create_dcf_pdf
+from services.excel_export import create_standard_dcf_excel
+from components.dcf_steps.company_step import (
+    render_company_step,
+    get_company_inputs_from_state,
+)
+from components.dcf_steps.forecast_step import (
+    render_forecast_step,
+    get_scenarios_from_state,
+)
+from components.dcf_steps.scenarios_step import (
+    render_scenarios_step,
+    get_scenario_assumptions_from_state,
+)
+from components.dcf_steps.run_step import build_dcf_outputs
+from components.dcf_steps.results_step import render_results_step
+from components.ui.workflow import render_workflow_progress, render_workflow_cards
+from components.ui.cards import glass_card
+
+
+def render_dcf_wizard(
+    page_header,
+    section_title,
+    metric_card,
+    activity_item,
+):
+    page_header(
+        "Standard DCF Builder",
+        "Institutional step-by-step valuation workflow for public and private companies."
+    )
+
+    wizard_steps = [
+        "1 · Company",
+        "2 · Forecast",
+        "3 · Scenarios",
+        "4 · Run Model",
+        "5 · Results",
+    ]
+
+    st.session_state.setdefault("dcf_step_index", 0)
+
+    step_index = st.session_state["dcf_step_index"]
+    selected_step = wizard_steps[step_index]
+
+    nav_left, nav_center, nav_right = st.columns([1, 5, 1])
+
+    with nav_left:
+        if step_index > 0:
+            if st.button("← Back", key="dcf_back_button", use_container_width=True):
+                st.session_state["dcf_step_index"] -= 1
+                st.rerun()
+
+    with nav_center:
+        render_workflow_progress(wizard_steps, step_index)
+
+    with nav_right:
+        if step_index < len(wizard_steps) - 1:
+            if st.button("Next →", key="dcf_next_button", use_container_width=True):
+                st.session_state["dcf_step_index"] += 1
+                st.rerun()
+
+    render_workflow_cards(wizard_steps, step_index)
+
+    st.markdown(
+        f"""
+        <div class="veles-step-breadcrumb">
+            <span>Step {step_index + 1} of {len(wizard_steps)}</span>
+            <strong>{selected_step}</strong>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+    if selected_step == "1 · Company":
+        company_inputs = render_company_step(section_title)
+    else:
+        company_inputs = get_company_inputs_from_state()
+
+    company_name = company_inputs["company_name"]
+    current_market_cap = company_inputs["current_market_cap"]
+    cash = company_inputs["cash"]
+    debt = company_inputs["debt"]
+    shares = company_inputs["shares"]
+    starting_revenue = company_inputs["starting_revenue"]
+    forecast_years = company_inputs["forecast_years"]
+
+    if selected_step == "2 · Forecast":
+        section_title(
+            "Step 2 — Forecast Assumptions",
+            "Define operating assumptions for downside, base, and upside cases."
+        )
+        forecast_assumptions = render_forecast_step()
+    else:
+        forecast_assumptions = get_scenarios_from_state()
+
+    if selected_step == "3 · Scenarios":
+        section_title(
+            "Step 3 — Valuation Scenarios",
+            "Define discount rates, terminal growth assumptions, and margin of safety."
+        )
+        valuation_assumptions = render_scenarios_step()
+    else:
+        valuation_assumptions = get_scenario_assumptions_from_state()
+
+    scenarios = {}
+
+    for scenario_name in forecast_assumptions.keys():
+        scenarios[scenario_name] = {
+            **forecast_assumptions[scenario_name],
+            **valuation_assumptions[scenario_name],
+        }
+
+    if selected_step == "5 · Results":
+        render_results_step(
+            section_title=section_title,
+            metric_card=metric_card,
+            activity_item=activity_item,
+        )
+
+    if selected_step == "4 · Run Model":
+        section_title(
+            "Step 4 — Valuation Engine",
+            "Validate assumptions, generate scenario outputs, prepare sensitivity analysis, and stage exports."
+        )
+
+        engine_col, output_col = st.columns([1.35, 1])
+
+        with engine_col:
+            glass_card(
+                title="Ready to Generate Institutional Valuation",
+                eyebrow="Valuation Engine",
+                body="Veles will validate company inputs, merge forecast and valuation assumptions, run downside/base/upside DCF cases, build sensitivity analysis, calculate reverse DCF implied growth, generate comparable valuation outputs, and prepare exports."
+            )
+
+        with output_col:
+            glass_card(
+                title="Outputs Prepared",
+                eyebrow="Model Package",
+                body="Scenario summary, base-case forecast, sensitivity matrix, reverse DCF implied growth, comparable valuation output, PDF report data, and Excel export data."
+            )
+
+        # Display the canonical state that will be consumed when
+        # Run DCF Analysis is clicked.
+        preview_forecast = get_scenarios_from_state()
+        preview_valuation = get_scenario_assumptions_from_state()
+
+        if (
+            "Base Case" in preview_forecast
+            and "Base Case" in preview_valuation
+        ):
+            st.caption(
+                "Run inputs — "
+                f"Growth: {preview_forecast['Base Case']['growth']:.1%} | "
+                f"EBIT margin: {preview_forecast['Base Case']['ebit_margin']:.1%} | "
+                f"CapEx: {preview_forecast['Base Case']['capex_pct']:.1%} | "
+                f"WACC: {preview_valuation['Base Case']['discount_rate']:.1%} | "
+                f"Terminal growth: {preview_valuation['Base Case']['terminal_growth']:.1%}"
+            )
+
+        # Display the canonical state that will be consumed when
+        # Run DCF Analysis is clicked.
+        preview_forecast = get_scenarios_from_state()
+        preview_valuation = get_scenario_assumptions_from_state()
+
+        if (
+            "Base Case" in preview_forecast
+            and "Base Case" in preview_valuation
+        ):
+            st.caption(
+                "Run inputs — "
+                f"Growth: {preview_forecast['Base Case']['growth']:.1%} | "
+                f"EBIT margin: {preview_forecast['Base Case']['ebit_margin']:.1%} | "
+                f"CapEx: {preview_forecast['Base Case']['capex_pct']:.1%} | "
+                f"WACC: {preview_valuation['Base Case']['discount_rate']:.1%} | "
+                f"Terminal growth: {preview_valuation['Base Case']['terminal_growth']:.1%}"
+            )
+
+        run_model = st.button(
+            "Run DCF Analysis",
+            type="primary",
+            use_container_width=True,
+            key="dcf_run_model_button",
+        )
+    else:
+        run_model = False
+
+    if selected_step == "4 · Run Model" and run_model:
+        # ----------------------------------------------------------
+        # FINAL MODEL INPUT SNAPSHOT
+        #
+        # Never run the valuation from a scenario dictionary that
+        # may have been assembled during an earlier Streamlit render.
+        #
+        # Re-read the canonical Step 2 and Step 3 widget state at the
+        # exact moment the user clicks Run DCF Analysis.
+        # ----------------------------------------------------------
+        live_forecast_assumptions = get_scenarios_from_state()
+        live_valuation_assumptions = get_scenario_assumptions_from_state()
+
+        live_scenarios = {}
+
+        for scenario_name in live_forecast_assumptions.keys():
+            live_scenarios[scenario_name] = {
+                **live_forecast_assumptions[scenario_name],
+                **live_valuation_assumptions[scenario_name],
+            }
+
+        # Keep a transparent snapshot for Results / exports / debugging.
+        st.session_state["dcf_last_run_scenarios"] = live_scenarios
+
+
+        try:
+            outputs = build_dcf_outputs(
+                company_inputs=company_inputs,
+                scenarios=live_scenarios,
+            )
+        except ValidationError as e:
+            st.error(str(e))
+            st.stop()
+
+        company_name = outputs["company_name"]
+        current_market_cap = outputs["current_market_cap"]
+        cash = outputs["cash"]
+        debt = outputs["debt"]
+        shares = outputs["shares"]
+        starting_revenue = outputs["starting_revenue"]
+        forecast_years = outputs["forecast_years"]
+        summary_df = outputs["summary_df"]
+        forecasts = outputs["forecasts"]
+        base_forecast = outputs["base_forecast"]
+        sens_df = outputs["sens_df"]
+        implied_growth = outputs["implied_growth"]
+        comps_df = outputs["comps_df"]
+        comps_summary = outputs["comps_summary"]
+        comps_summary_df = outputs["comps_summary_df"]
+
+        st.session_state["dcf_outputs"] = outputs
+        st.session_state["standard_dcf_outputs"] = outputs
+
+        st.success("DCF model generated successfully.")
+
+        if st.button("View Results →", key="dcf_view_results_button"):
+            st.session_state["dcf_step_index"] = 4
+            st.rerun()

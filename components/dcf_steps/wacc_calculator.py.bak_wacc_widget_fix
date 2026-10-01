@@ -1,0 +1,133 @@
+import streamlit as st
+
+from services.wacc import (
+    calculate_cost_of_equity,
+    calculate_after_tax_cost_of_debt,
+    calculate_wacc,
+)
+
+
+def render_wacc_calculator(default_equity_value=1000.0, default_debt_value=0.0):
+    pending_auto_wacc = st.session_state.pop("pending_auto_wacc_inputs", None)
+    if pending_auto_wacc:
+        for key, value in pending_auto_wacc.items():
+            st.session_state[key] = value
+
+    with st.expander("WACC Calculator", expanded=False):
+        st.caption("Estimate discount rate using CAPM, after-tax cost of debt, and target capital structure.")
+
+        col1, col2, col3 = st.columns(3)
+
+        with col1:
+            st.session_state.setdefault("wacc_risk_free_rate", 0.045)
+            risk_free_rate = st.number_input("Risk-free rate", format="%.3f", key="wacc_risk_free_rate")
+            st.session_state.setdefault("wacc_beta", 1.20)
+            beta = st.number_input("Beta", format="%.2f", key="wacc_beta")
+            st.session_state.setdefault("wacc_equity_risk_premium", 0.055)
+            equity_risk_premium = st.number_input("Equity risk premium", format="%.3f", key="wacc_equity_risk_premium")
+
+        with col2:
+            st.session_state.setdefault("wacc_size_premium", 0.000)
+            size_premium = st.number_input("Size premium", format="%.3f", key="wacc_size_premium")
+            st.session_state.setdefault("wacc_company_specific_premium", 0.000)
+            company_specific_premium = st.number_input("Company-specific premium", format="%.3f", key="wacc_company_specific_premium")
+            st.session_state.setdefault("wacc_pre_tax_cost_of_debt", 0.070)
+            pre_tax_cost_of_debt = st.number_input("Pre-tax cost of debt", format="%.3f", key="wacc_pre_tax_cost_of_debt")
+
+        with col3:
+            st.session_state.setdefault("wacc_tax_rate", 0.210)
+            tax_rate = st.number_input("Tax rate", format="%.3f", key="wacc_tax_rate")
+            st.session_state.setdefault("wacc_market_value_equity", float(default_equity_value))
+            market_value_equity = st.number_input("Market value of equity ($M)", key="wacc_market_value_equity")
+            st.session_state.setdefault("wacc_market_value_debt", float(default_debt_value))
+            market_value_debt = st.number_input("Market value of debt ($M)", key="wacc_market_value_debt")
+
+        cost_of_equity = calculate_cost_of_equity(
+            risk_free_rate,
+            beta,
+            equity_risk_premium,
+            size_premium,
+            company_specific_premium,
+        )
+
+        after_tax_cost_of_debt = calculate_after_tax_cost_of_debt(
+            pre_tax_cost_of_debt,
+            tax_rate,
+        )
+
+        wacc = calculate_wacc(
+            market_value_equity,
+            market_value_debt,
+            cost_of_equity,
+            after_tax_cost_of_debt,
+        )
+
+        st.session_state["wacc_cost_of_equity"] = cost_of_equity
+        st.session_state["wacc_after_tax_cost_of_debt"] = after_tax_cost_of_debt
+        st.session_state["wacc_calculated"] = wacc
+
+        # Initialize DCF scenario discount rates from the calculated
+        # company-specific WACC. Do not overwrite later manual edits.
+        if not st.session_state.get("dcf_wacc_scenarios_initialized", False):
+            st.session_state[
+                "dcf_scenario_Worst Case_discount_rate"
+            ] = min(float(wacc) + 0.01, 0.30)
+
+            st.session_state[
+                "dcf_scenario_Base Case_discount_rate"
+            ] = float(wacc)
+
+            st.session_state[
+                "dcf_scenario_Best Case_discount_rate"
+            ] = max(float(wacc) - 0.01, 0.01)
+
+            st.session_state[
+                "dcf_wacc_scenarios_initialized"
+            ] = True
+
+        out1, out2, out3 = st.columns(3)
+
+        with out1:
+            st.metric("Cost of Equity", f"{cost_of_equity:.1%}")
+
+        with out2:
+            st.metric("After-Tax Cost of Debt", f"{after_tax_cost_of_debt:.1%}")
+
+        with out3:
+            st.metric("Calculated WACC", f"{wacc:.1%}")
+
+        auto_wacc_col1, auto_wacc_col2 = st.columns(2)
+
+        with auto_wacc_col1:
+            if st.button("Auto-WACC From Loaded Ticker", key="auto_wacc_from_ticker", use_container_width=True):
+                snapshot = st.session_state.get("dcf_loaded_ticker_snapshot", {})
+
+                pending_inputs = {}
+
+                if snapshot.get("beta") is not None:
+                    pending_inputs["wacc_beta"] = float(snapshot["beta"])
+
+                if snapshot.get("market_cap") is not None:
+                    pending_inputs["wacc_market_value_equity"] = float(snapshot["market_cap"])
+
+                if snapshot.get("debt") is not None:
+                    pending_inputs["wacc_market_value_debt"] = float(snapshot["debt"])
+
+                st.session_state["pending_auto_wacc_inputs"] = pending_inputs
+
+                # Reinitialize scenario discount rates using the newly
+                # loaded company-specific WACC on the next render.
+                st.session_state[
+                    "dcf_wacc_scenarios_initialized"
+                ] = False
+
+                st.success("WACC assumptions updated from loaded ticker.")
+                st.rerun()
+
+        with auto_wacc_col2:
+            if st.button("Use WACC as Base Case Discount Rate", key="use_wacc_base_case", use_container_width=True):
+                st.session_state["pending_base_case_wacc"] = wacc
+                st.success("WACC staged for Base Case discount rate. It will apply after refresh.")
+                st.rerun()
+
+        return wacc
