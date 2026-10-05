@@ -1,5 +1,4 @@
 from datetime import date
-from services.data.company_data_service import get_company_data
 from services.reports.equity_report_assembler import assemble_equity_report
 from services.reports.profiles import resolve_report_profile
 
